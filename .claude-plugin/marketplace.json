@@ -1,0 +1,14 @@
+{
+  "name": "cch-lite",
+  "owner": {
+    "name": "roylam-beep"
+  },
+  "description": "roylam-beep 的輕量 harness marketplace：cch-lite。",
+  "plugins": [
+    {
+      "name": "cch-lite",
+      "source": "./",
+      "description": "Claude Code 輕量開發治理層：cc-* skill 家族、感測 hook、文件閘、骨架安裝器。開發／SEO／行銷 repo 通用。"
+    }
+  ]
+}

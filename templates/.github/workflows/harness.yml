@@ -1,0 +1,23 @@
+# 快閘保證點＝本 job＋main ruleset 把 harness-gate 設成 required check（commands/cc-setup.md W4.5）。
+# 本機 pre-commit 只是提早回饋：.git/hooks 不隨 clone 走，cloud／Cursor／gh pr merge 都繞得過。
+name: harness
+on:
+  pull_request:
+  push:
+jobs:
+  harness-gate:
+    # push 只在 repo 預設分支跑（不寫死 main）；PR 一律跑。
+    if: github.event_name == 'pull_request' || github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 不照抄 pre-commit「找不到就放行」：這裡缺 check_docs.py 就該紅。
+      - run: python3 scripts/check_docs.py .
+      # checkout 裡只有被追蹤的檔：被 .gitignore 擋掉的標準件在這裡不存在＝紅。
+      # 清單每一項都要在 templates/README.md 對照表裡（test/harness-workflow.test.sh 守）。
+      - run: |
+          for f in CLAUDE.md AGENTS.md BACKLOG.md handovers/README.md docs/archive/rounds.md \
+                   docs/archive/ICEBERG.md .claude/rules/implementation.md .claude/settings.json \
+                   scripts/check_docs.py; do
+            test -f "$f" || { echo "::error::$f 不在版控（被 .gitignore 擋掉？用 git add -f 加入）"; exit 1; }
+          done

@@ -1,0 +1,15 @@
+{
+  "name": "cch-lite",
+  "version": "0.6.0",
+  "description": "Claude Code 輕量開發治理層：cc-* skill 家族、感測 hook、文件閘、骨架安裝器。開發／SEO／行銷 repo 通用。",
+  "author": {
+    "name": "roylam-beep"
+  },
+  "license": "MIT",
+  "keywords": [
+    "harness",
+    "governance",
+    "workflow"
+  ],
+  "commands": "./commands"
+}

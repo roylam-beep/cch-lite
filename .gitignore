@@ -1,0 +1,5 @@
+.DS_Store
+scratch/
+*.log
+# 本 repo 不放任何憑證、真實帳號 ID、客戶名；usage 腳本輸出只含 skill 名與日期
+.claude-plugin/types/

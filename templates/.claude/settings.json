@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "cch-lite": {
+      "source": {
+        "source": "github",
+        "repo": "<owner>/<repo>"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "cch-lite@cch-lite": true
+  }
+}

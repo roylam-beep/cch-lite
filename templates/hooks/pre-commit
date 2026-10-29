@@ -1,0 +1,10 @@
+#!/bin/sh
+# 快閘：文件／死指標檢查。整包閘（測試、plugin validate）留到 push 前手動跑。
+# 先找 scripts/ 再找 tools/，跑第一支找到的；都找不到就放行——絕不讓一個缺檔擋住所有 commit。
+# 沒有 python3 也放行（印警告）：同一道檢查在 CI 的 harness.yml 還會跑。
+ROOT="$(git rev-parse --show-toplevel)"
+command -v python3 >/dev/null 2>&1 || { echo "⚠️  pre-commit：找不到 python3，文件檢查跳過（CI 仍會跑）" >&2; exit 0; }
+for P in "$ROOT/scripts/check_docs.py" "$ROOT/tools/check_docs.py"; do
+  [ -f "$P" ] && { python3 "$P" "$ROOT"; exit $?; }
+done
+exit 0
