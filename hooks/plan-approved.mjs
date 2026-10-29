@@ -4,7 +4,7 @@
 // 為什麼掛在核准、不掛在回合結束：Stop 事件帶 additionalContext 會讓對話自動續跑一輪，等於擋住使用者。
 //
 // 輸入：stdin 收 {tool_name, tool_response:{plan, filePath}}。`tool_response` 文件標為 "the approved plan"。
-// **未驗證**：計畫被拒絕時本事件會不會觸發。保險做法：`plan` 是空的就不提醒。
+// 實測（2026-10-30，Claude Code desktop）：核准 → 提醒出現且帶計畫檔路徑；拒絕 → 不出現。`plan` 空就不提醒的判斷仍保留當保險。
 // **解析失敗一律放行（fail open）**：壞掉時最糟是少一句提醒，不准讓工具呼叫出錯。
 //
 // 純函式 reminder 對外 export，由 test/plan-approved.test.mjs 直接測。
