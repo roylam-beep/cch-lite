@@ -14,6 +14,8 @@ Claude Code 專用的**輕量**開發治理層（harness）：skill 家族、hoo
 .claude-plugin/plugin.json      plugin 宣告（version 是快取的 key，見「改了要 bump」）
 .claude-plugin/marketplace.json marketplace 宣告（GitHub 或本機目錄都從這裡裝）
 commands/cc-*.md                skill 家族（**唯一一份**，帳號層已清空）
+commands/html-explain.md        手動叫出：主題做成一頁 HTML（排版交給 vendor 的 am.mjs）
+vendor/answer-me-with-html/     上游 QingYunA/answer-me-with-html 0.5.10（aab9ea1）的 am.mjs＋授權，MIT；更新＝重新複製，改這行
 hooks/hooks.json                plugin 掛哪些 hook 以這檔為準
 hooks/session-start.sh          開場印常駐載入字元數
 hooks/guard-bash.mjs            PreToolUse(Bash) 攔不可逆指令、遠端寫入要確認（fail open）
