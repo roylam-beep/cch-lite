@@ -20,6 +20,7 @@ echo "── check_docs 別名與設定 ──"
 sh test/check-docs-config.test.sh
 echo "── test_skills ──"
 python3 test/test_skills.py
+sh test/test-skills-hash.test.sh
 echo "── pre-commit ──"
 sh test/pre-commit.test.sh
 echo "── harness workflow ──"

@@ -71,6 +71,15 @@ def check_frontmatter(name, fm, body, fails):
         add(fails, name, "frontmatter", "frontmatter 缺 description（沒有它 agent 無從判斷何時該用）")
 
 
+def check_description_hash(name, fm, fails):
+    """坑：YAML 把「空白＋#」當註解開頭，description 從那裡起被靜默截掉，不報錯。
+    引號能救，但最省事是別寫，所以一律紅。"""
+    if fm is None:
+        return
+    if re.search(r"\s#", fm.get("description", "")):
+        add(fails, name, "hash", "description 含「空白＋#」，YAML 會把後面當註解截掉（拿掉 #）")
+
+
 def check_no_dates(name, text, fails):
     """坑（R2 的 B 類教訓）：規則本文寫「X 已於 <日期> 退役」會讓規則變成歷史敘述，
     讀者要先分辨哪句還有效。退役史唯一落點是 ~/.claude 的 git 歷史。
@@ -170,6 +179,7 @@ def main():
         text = load(os.path.join(cmd_dir, name))
         fm, body = split_frontmatter(text)
         check_frontmatter(name, fm, body, fails)
+        check_description_hash(name, fm, fails)
         check_no_dates(name, text, fails)
         check_has_purpose(name, body, fails)
         check_argument_contract(name, fm, body, fails)
@@ -194,7 +204,7 @@ def main():
         for x in hard:
             print(" -", x)
         return 1
-    print(f"TEST_SKILLS OK（{len(names)} 支 × 7 類：frontmatter、無日期、有防什麼、"
+    print(f"TEST_SKILLS OK（{len(names)} 支 × 8 類：frontmatter、description 無「空白＋#」、無日期、有防什麼、"
           f"argument 契約、cross-ref、副作用分級、~ 路徑存在；已知缺口 {len(warn)} 項見上）")
     return 0
 
