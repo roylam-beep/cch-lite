@@ -10,7 +10,6 @@
 
 | # | 一行 | 日期 |
 |---|---|---|
-| 8 | `hooks/guard-bash.mjs` 展不開變數：`rm -rf $T`（$T 在 scratchpad）被 fail-closed 誤擋 | 2026-09-04 |
-| 9 | `.claude/**` 被當敏感路徑擋 Edit，連 repo 層也擋，逼 agent 改用 python 寫入＝完全繞過守衛 | 2026-09-04 |
-| 17 | 本 repo 的 project-scope 安裝 0.3.4 蓋過 user 0.4.3，hook 跑舊版；`check-plugin-sync.sh` 只比 user→假綠 | 2026-09-28 |
+| 17 | 專案層舊版蓋過帳號層（meta-ads 專案層 cch-lite 0.6.1 壓過 0.6.2）；`check-plugin-sync.sh` 只比帳號層→假綠 | 2026-11-01 |
 | 20 | `cc-setup.md` 沒寫 `.claude/` 被 `.gitignore` 排除時怎麼辦；brag 安裝靠 agent 臨場 `git add -f` 才進版控 | 2026-10-04 |
+| 21 | `test/test_skills.py` 只掃 `commands/cc-*.md`，`commands/html-explain.md` 不受任何契約檢查 | 2026-11-01 |
