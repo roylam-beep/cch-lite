@@ -23,7 +23,7 @@ KNOWN_GAPS = {}
 
 # 宣告唯讀的 skill 必須真的擋掉寫入工具。allowed-tools 實測不收斂工具（見 docs/decisions.md），
 # 所以唯讀要靠 disallowed-tools。
-READONLY = {"cc-audit", "cc-grill", "cc-root", "cc-show", "cc-explain", "cc-skillcheck"}
+READONLY = {"cc-trim", "cc-grill", "cc-root", "cc-show", "cc-explain", "cc-skillcheck"}
 WRITE_TOOLS = ("Write", "Edit")
 
 
@@ -90,7 +90,7 @@ def check_no_dates(name, text, fails):
 
 
 def check_has_purpose(name, body, fails):
-    """坑：說不出防哪個失敗的 skill，每季 /cc-audit 無從判斷它還該不該活（README 規矩 2）。
+    """坑：說不出防哪個失敗的 skill，每季 /cc-trim 無從判斷它還該不該活（README 規矩 2）。
     只看 body 的 `## 防什麼` 標題——description 裡順口提到不算。"""
     if re.search(r"^## 防什麼\s*$", body, re.M):
         return

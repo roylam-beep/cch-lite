@@ -1,11 +1,11 @@
 ---
-description: 唯讀審一份 harness／skill／prompt／計畫／程式碼有沒有過度工程，列出砍掉也不損功能的東西。只列不改、不 commit。EN: audit for over-engineering, what can be cut
+description: 列出可以整條拿掉、又不損功能的東西——計畫、skill／prompt、規則檔、工具或 API 清單、既有程式碼、整個 repo 的 harness 都能審。只列不改、不 commit。這次改動的程式碼要寫得更簡潔，改用內建 /simplify。EN: trim, what can be cut, over-engineering audit
 argument-hint: "[要審的目標：檔案路徑、目錄、或「本 repo 的 harness」之類的一句話]"
 allowed-tools: Read, Glob, Grep, Bash(git log:*), Bash(git diff:*), Bash(ls:*), Bash(wc:*), Bash(grep:*), Bash(find:*)
 disallowed-tools: Write, Edit, NotebookEdit
 ---
 
-審 $ARGUMENTS——prompt、agent 設定、harness、skill、計畫、程式碼、整個 repo 都可以。
+審 $ARGUMENTS——prompt、agent 設定、harness、skill、計畫、工具或 API 清單、程式碼、整個 repo 都可以。
 沒指定就審當前 repo 的 harness 層。
 
 只找一件事：**在不砍掉任何現有功能的前提下，有什麼可以拿掉**。大刀在前。
@@ -40,6 +40,7 @@ disallowed-tools: Write, Edit, NotebookEdit
 
 結尾一行 `net: -<N> 字／行，-<M> 個要記的概念。`
 沒東西可砍就只回 `已經夠瘦，出貨。` 然後停——**不要為了交差硬湊**。
+審的範圍裡有未提交的程式碼改動（`git diff` 非空）時，最後多印一行：`程式碼寫法整潔度 → 跑 /simplify`。
 
 ## 不准砍的
 
@@ -49,8 +50,9 @@ fail-open 時那句出聲的降級提示、機器可驗的單一事實來源。
 
 ## 邊界
 
-- **範圍只有過度工程。** 正確性 bug 走 `/code-review`，安全漏洞走 `/security-review`，
-  已改動程式碼的整潔度走 `/simplify`（那支會直接動手改，本支不會）。
+- **範圍只有「整條拿掉」。** 正確性 bug 走 `/code-review`，安全漏洞走 `/security-review`，
+  這次改動的程式碼寫得夠不夠簡潔走 `/simplify`（那支會直接動手改，本支不會）。
+  既有程式碼只看「有沒有整塊可拿掉」；沒改動的程式碼寫法整潔度，兩支都不管。
 - **唯讀：只列不改、不 commit。** 要落地由使用者說一聲，或自己下一步做。
 - 一次性報告，不建任何檔、不進 BACKLOG。
 

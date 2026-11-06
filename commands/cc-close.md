@@ -23,11 +23,11 @@ repo 專屬的上限看 `BACKLOG.md` 檔頭與 `scripts/check_docs.py`。
 
 ## 輸出契約
 
-**先派退格。** 第①步之前，用 Agent 工具派 audit 子 agent，回來才做①。
+**先派退格。** 第①步之前，用 Agent 工具派 trim 子 agent，回來才做①。
 prompt 只給路徑（skill 本文先跑 `ls "${CLAUDE_PLUGIN_ROOT}/commands/<名>.md"` 拿到絕對路徑再給）、輪次代號、要看的檔，
 **不轉述本輪經過**——它的價值就是沒看過這段對話。「本輪」＝上一份交接單第一行 `基準：`（英文 repo 寫 `Base:` 也認）的 SHA 到 `HEAD`。
-**audit**：本輪動過的規則檔（auto-load 規則檔、`AGENTS.md`、`CLAUDE.md`、`docs/decisions.md`、`commands/`、`templates/`）
-有任何一個才派，照 `/cc-audit` 只審本輪新增的部分。回來的 `delete`／`dup` 照砍、併進①的 commit——砍了會讓測試紅的才留，回報寫原因；
+**trim**：本輪動過的規則檔（auto-load 規則檔、`AGENTS.md`、`CLAUDE.md`、`docs/decisions.md`、`commands/`、`templates/`）
+有任何一個才派，照 `/cc-trim` 只審本輪新增的部分。回來的 `delete`／`dup` 照砍、併進①的 commit——砍了會讓測試紅的才留，回報寫原因；
 `yagni`／`over-test`／`ritual` 不自動砍，列進回報讓使用者決定。Agent 工具叫不起來：跳過並在回報寫「未退格」。
 
 gate 不在收輪派：要驗收另叫 `/cc-gate`。
