@@ -1,7 +1,7 @@
 ---
-description: 指定一支 skill 做體檢：SkillEvaluator 的 9 項評分標準由 Claude 自己打分（不用 API）＋機器規則打分與個資掃描＋查它跟哪支已裝 skill 搶觸發。唯讀，只回報不改。EN: audit one skill, score a skill, does this skill trigger right
+description: 指定一支 skill 做體檢：SkillEvaluator 的 9 項評分標準由 Claude 自己打分（不用 API）＋個資掃描＋查它跟哪支已裝 skill 搶觸發。唯讀，只回報不改。EN: audit one skill, score a skill, does this skill trigger right
 argument-hint: "<skill 名稱或路徑，例：content-audit、anthropic-skills:skill-auditor、./skills/foo>"
-allowed-tools: Read, Glob, Grep, Bash(find:*), Bash(uvx:*), Bash(mktemp:*), Bash(mkdir:*), Bash(cp:*), Bash(ls:*)
+allowed-tools: Read, Glob, Grep, Bash(find:*), Bash(ls:*)
 disallowed-tools: Write, Edit, NotebookEdit
 disable-model-invocation: true
 ---
@@ -43,26 +43,15 @@ find . ~/.claude/skills ~/.claude/commands ~/.claude/plugins/cache \
 總分＝加權平均 ×10；**60 分以上且每項都 ≥7** 才算通過。每項評語要指出 skill 裡的行號或原句，
 說不出依據就不給低分。觸發模擬那 8 句要寫進報告。
 
-## 2. 機器打分＋個資掃描（不呼叫模型）
+## 2. 個資
 
-前提：PATH 上有 `uv`。沒有就跳過這段，報告寫一句「沒有 uv，第 2 段沒跑」。
-第一次跑會下載建置 SkillEvaluator，約十幾秒到一分鐘。報告放暫存目錄，不寫進 repo：
+整支 skill（含同資料夾的 `scripts/`、`references/`）分兩步查：
 
-```bash
-T=$(mktemp -d "${TMPDIR:-/tmp}/cc-skillcheck.XXXX"); mkdir -p "$T/s/<名稱>"
-cp <單檔 .md> "$T/s/<名稱>/SKILL.md"      # 資料夾就改成 cp -R <資料夾>/. "$T/s/<名稱>/"
-se() { uvx -q --python 3.13 --from git+https://github.com/roylam-beep/SkillEvaluator@c9d170e77bdef0b32a4811fb9b14484578559b2e skillevaluator "$@"; }
-se quality-check "$T/s" -r cli -r json -o "$T/q"
-se pii-scan "$T/s" -r cli -r json -o "$T/p"
-```
+1. **Grep 掃格式**：email、帶使用者名稱的家目錄（`/Users/<名>/`、`/home/<名>/`）、電話號碼、
+   金鑰樣式（`sk-`、`AKIA`、`AIza`、`Bearer `、`api_key=`）。
+2. **讀一遍找名稱**：客戶名、品牌名、真實人名、廣告帳號 ID。格式掃不到這類，要靠讀。
 
-用 function 不用 `SE="uvx …"; $SE`：zsh 不拆變數裡的空格，實測 exit 127。版本釘在 commit，升版要重驗下面這條過濾。
-
-`quality-check` 對中文 skill 的扣分幾乎全是英文標題比對（缺 `## Purpose`／`## Limitations`／
-`## Troubleshooting`…），實測沒有訊號：**不逐條列**，收成一行 `略過 <N> 條英文標題比對`；
-那些資訊是不是真的缺，第 1 段已經判過。提到 `run_script`／`activate_skill` 的也略過：那是 NVIDIA 執行環境的工具名，
-Claude Code 用不到。其餘 finding 與 `pii-scan` 全部照列。
-`pii-scan` 實測抓得到 email 與帶使用者名稱的家目錄路徑；抓不到電話與 API key，不要宣稱查過。
+命中逐條列 `行號＋原文片段`。輸出的「個資」欄只照這兩步的結果填；讀檔時看到人名或客戶名卻填「通過」＝這段沒做完。
 
 ## 3. 撞誰
 
@@ -73,12 +62,11 @@ Claude Code 用不到。其餘 finding 與 `pii-scan` 全部照列。
 
 ```
 審：<路徑>
-總分 <N>/100（<通過／不通過>）｜機器分 <N>｜個資 <PASS／N 條>｜撞 <N> 支
+總分 <N>/100（<通過／不通過>）｜個資 <通過／N 條>｜撞 <N> 支
 <九項一項一行：項目 分數/10 — 一句評語 [行號]>
 觸發模擬：該接 <5 句，各標 ✓✗>；不該接 <3 句，各標 ✓✗>
 fix：<最該改的，最多 3 條，最嚴重在前，附行號與改法>
 撞：/<這支> ↔ /<那支>：「<那句話>」兩邊都接。建議 <哪支 description 加什麼排除語>。
-略過 <N> 條英文標題比對；完整機器報告：$T
 ```
 
 「裝了這支，結果有沒有變好」（裝與不裝各跑一次比較）不在這裡做，那要燒好幾倍用量；
