@@ -11,5 +11,4 @@
 | # | 一行 | 日期 |
 |---|---|---|
 | 17 | 專案層舊版蓋過帳號層（meta-ads 專案層 cch-lite 0.6.1 壓過 0.6.2）；`check-plugin-sync.sh` 只比帳號層→假綠 | 2026-11-01 |
-| 20 | `cc-setup.md` 沒寫 `.claude/` 被 `.gitignore` 排除時怎麼辦；brag 安裝靠 agent 臨場 `git add -f` 才進版控 | 2026-10-04 |
 | 21 | `test/test_skills.py` 只掃 `commands/cc-*.md`，`commands/html-explain.md` 不受任何契約檢查 | 2026-11-01 |

@@ -56,10 +56,11 @@ sh tools/install-hooks.sh                           # 裝 git hook
 |---|---|
 | `commands/`、`templates/` 的本文 | 直接生效，下一次呼叫就是新的 |
 | `commands/` **新增或刪除檔** | 同 hook：要 bump（清單從快取列，實測 2026-09-23） |
-| `hooks/`、`tools/` | bump `version` → `claude plugin update cch-lite` → **重開 session** |
+| `hooks/`、`tools/` | bump `version` → `claude plugin update cch-lite@cch-lite --scope user` → **重開 session** |
 
 原因：command 走原始 repo，hook 走 `~/.claude/plugins/cache/…/<version>/` 的複本，
 而版本在 session 開始時釘住。`sh tools/check-plugin-sync.sh` 守這件事。
+在本 repo 目錄裡不帶 `--scope` 只會更新專案層那份（`.claude/settings.json` 有啟用），帳號層仍是舊版（實測 2026-11-06）。
 
 ## 規矩（本 repo 自己的，四條）
 
