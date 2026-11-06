@@ -238,17 +238,21 @@ test("非字串／空輸入放行（fail open）", () => {
 });
 
 
-test("逃生門 CC_GUARD_BASH=off：設了整支停用，沒設照擋", () => {
+test("逃生門 CC_GUARD_BASH=off：設了整支停用，沒設照問", () => {
   // 這條只能端對端測——開關在 main()，不在純函式裡。
   // 設計重點：讀的是 **hook 進程自己的 env**，所以 agent 在 Bash 指令裡塞
   // `CC_GUARD_BASH=off …` 沒有用（那是它子 shell 的環境），不構成繞過路徑。
   const hook = new URL("../hooks/guard-bash.mjs", import.meta.url).pathname;
   const payload = JSON.stringify({ tool_name: "Bash", tool_input: { command: "git push --force origin main" } });
-  const run = (env) => spawnSync(process.execPath, [hook], { input: payload, env: { ...process.env, ...env } }).status;
+  const run = (env) => {
+    const r = spawnSync(process.execPath, [hook], { input: payload, env: { ...process.env, CC_GUARD_BASH_ALLOW: undefined, ...env } });
+    assert.equal(r.status, 0, "命中也是 exit 0（交給確認框，不硬擋）");
+    return r.stdout.toString() ? JSON.parse(r.stdout.toString()).hookSpecificOutput.permissionDecision : "";
+  };
 
-  assert.equal(run({ CC_GUARD_BASH: undefined }), 2, "沒設開關時 force push 要照擋");
-  assert.equal(run({ CC_GUARD_BASH: "off" }), 0, "設了 off 要整支停用");
-  assert.equal(run({ CC_GUARD_BASH: "on" }), 2, "只有字面 off 才停用，其他值一律照擋");
+  assert.equal(run({ CC_GUARD_BASH: undefined }), "ask", "沒設開關時 force push 要跳確認框");
+  assert.equal(run({ CC_GUARD_BASH: "off" }), "", "設了 off 要整支停用");
+  assert.equal(run({ CC_GUARD_BASH: "on" }), "ask", "只有字面 off 才停用，其他值一律照問");
 });
 
 test("classifyToolInput：逐段規則優先，空輸入放行", () => {
@@ -310,8 +314,8 @@ test("遠端寫入：rsync 推上遠端、ssh 跟整批改寫資料庫、wp 遠�
   ]) {
     const hit = classifyRemoteWrite(cmd);
     assert.equal(hit?.key, "remote-write", `未攔：${cmd}`);
-    assert.equal(hit.decision, "ask", "遠端寫入只要求確認，不擋");
-    assert.equal(classifyToolInput({ command: cmd })?.decision, "ask", `classifyToolInput 沒接上：${cmd}`);
+    assert.equal(hit.key, "remote-write");
+    assert.equal(classifyToolInput({ command: cmd })?.key, "remote-write", `classifyToolInput 沒接上：${cmd}`);
   }
 });
 
@@ -340,7 +344,7 @@ test("遠端寫入：預演、下載、讀取、本機指令放行", () => {
   assert.equal(classifyRemoteWrite("ssh h 'wp db import x'", configFromEnv({ CC_GUARD_BASH_ALLOW: "remote-write" })), null, "remote-write 可逐類放行");
 });
 
-test("遠端寫入端對端：stdout 印 permissionDecision ask、exit 0；擋下類仍 exit 2", () => {
+test("端對端：命中一律 stdout 印 permissionDecision ask、exit 0；放行時 stdout 空", () => {
   const hook = new URL("../hooks/guard-bash.mjs", import.meta.url).pathname;
   const run = (command) => spawnSync(process.execPath, [hook], {
     input: JSON.stringify({ tool_name: "Bash", tool_input: { command } }),
@@ -352,7 +356,11 @@ test("遠端寫入端對端：stdout 印 permissionDecision ask、exit 0；擋�
   assert.equal(out.hookSpecificOutput.hookEventName, "PreToolUse");
   assert.equal(out.hookSpecificOutput.permissionDecision, "ask");
   assert.ok(out.hookSpecificOutput.permissionDecisionReason.includes("deploy@example.com"));
-  // 同一條指令同時有擋下類：擋下優先
-  assert.equal(run("rsync -a x host:/y && git push --force").status, 2);
+  // 同一條指令同時命中兩類：逐段規則優先，框裡寫的是 force push，並印可逐類放行的鍵
+  const both = run("rsync -a x host:/y && git push --force");
+  assert.equal(both.status, 0);
+  const reason = JSON.parse(both.stdout.toString()).hookSpecificOutput.permissionDecisionReason;
+  assert.ok(reason.startsWith("git push --force"), reason);
+  assert.ok(reason.includes('"CC_GUARD_BASH_ALLOW": "force-push"'), reason);
   assert.equal(run("ls").stdout.toString(), "", "放行時 stdout 不能有東西");
 });

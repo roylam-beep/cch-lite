@@ -11,12 +11,20 @@
     工單格式跟著派工搬去獨立的 `roylam-beep/rr-dispatcher`，兩個 plugin 互不相關、不互相引用。
   - **規劃用 Claude Code 內建 plan mode 的計畫檔**，不另訂格式、不強制「做完的樣子」節。
   - **驗收（`/cc-gate`）照計畫檔驗**：驗收員自己從計畫抽 3–7 條完成條件再逐條實跑；預設背景子 agent、`sonnet`、不擋使用者，只回報不改檔。
-    計畫核准時由 `hooks/plan-approved.mjs`（PostToolUse `ExitPlanMode`）提醒派驗收——只是提醒，模型仍可能忘。
+    〔2026-11-06 起：核准提醒 hook 已拆，見下一節〕計畫核准時由 PostToolUse `ExitPlanMode` 提醒派驗收——只是提醒，模型仍可能忘。
   - 安裝 skill 改名 `cc-harness` → `cc-setup`（避免 `/cch-lite:cc-harness` 這種混名）。
   - 帳號層改裝 cch-lite；已裝舊 cc-harness 的 repo 不動，兩套並存由使用者逐個換。
   **翻案條件**：背景驗收連續 5 次沒被派（計畫核准後無驗收結果）→ 提醒無效，重議觸發方式；或 3 次以上「計畫寫得太散，驗收員抽不出條件」→ 重議強制完成條件節。
 
-## harness 感測與量測
+## hook 精簡（2026-11-06）
+
+- **2026-11-06**｜**拆掉開場字數 hook 與計畫核准提醒 hook；`guard-bash.mjs` 命中一律跳確認框，不再硬擋**，使用者定案。0.7.0。
+  - 開場那行常駐字元數不再印，6,500 上限從此**沒有機器守**（下面 10-29、09-04 兩條的守位落空，數字仍是目標值）。
+  - `/cc-gate` 改靠 skill 本文「計畫做完就派」自律，沒有 hook 提醒。
+  - guard-bash：原本 exit 2 擋下、要使用者自己下指令；改成 stdout 印 `permissionDecision: "ask"`、exit 0，使用者在確認框按允許＝當輪授權。
+    理由：擋下後使用者得自己複製指令去跑，確認框一按就好，授權仍在使用者手上。`CC_GUARD_BASH_ALLOW` 的鍵改成「這類不跳確認框」。
+  **翻案條件**：使用者在確認框誤按允許造成無法還原的損失一次 → 重議 `force-push` 這類改回硬擋。
+
 
 - **2026-09-24**｜**拆掉 skill 使用量層**，使用者定案。拆：`tools/skill-usage.py`、`hooks/log-harness-event.mjs`
   與它掛的三個 hook（UserPromptExpansion／InstructionsLoaded／PreToolUse(Skill)）、SessionStart 第 1 行、

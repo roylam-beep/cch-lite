@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// PreToolUse(Bash) 攔不可逆指令。**這是 plugin 出貨的通用版**，由 hooks/hooks.json 掛上，
+// PreToolUse(Bash) 不可逆指令先跳確認框。**這是 plugin 出貨的通用版**，由 hooks/hooks.json 掛上，
 // 裝了 plugin 的 repo 全部生效。全域 CLAUDE.md 寫「不可逆操作先取得明確授權」是自律；本檔是機器保證。
-// 規則的由來與放寬紀錄在 docs/decisions.md，本檔只寫現在擋什麼、放什麼。
+// 規則的由來與放寬紀錄在 docs/decisions.md，本檔只寫現在攔什麼、放什麼。
 //
 // 觸發：每次 Bash 工具呼叫前，stdin 收 {tool_name, tool_input:{command}}。複合指令拆
-// `&&`／`;`／`|`／換行逐段判，所以「cd 某處 && 接遞迴刪除」也抓得到。擋下＝exit 2，stderr 含理由＋替代指令。
+// `&&`／`;`／`|`／換行逐段判，所以「cd 某處 && 接遞迴刪除」也抓得到。
+// 命中＝stdout 印 `permissionDecision: "ask"`、exit 0：跳確認框，理由＋替代做法寫在框裡，**使用者按允許才執行**、
+// 按拒絕就不跑。官方文件寫明 `ask` 在 auto mode 仍會跳確認（https://code.claude.com/docs/en/hooks）。
 //   · `git push --force`／`-f`／`--force-with-lease` — 改寫遠端歷史。**無例外**。
 //     刪遠端分支（`--delete`／`:branch`）不擋：已合併的分支刪了什麼都沒丟。
 //   · `git reset` 帶 mode 旗標（`--hard`／`--soft`／`--mixed`／`--keep`／`--merge`）— 丟改動或抹 commit
@@ -19,20 +21,19 @@
 //   · `git clean` 帶 force — 未追蹤檔救不回來。**放行** `-n`／`--dry-run`、不帶 force、`-X`（只刪 ignore 的
 //     build 產物）；小寫 `-x` 照擋。
 //   · **遠端寫入**（鍵 `remote-write`）— `rsync` 目的地是 `host:路徑`；`ssh`／`wp --ssh=…`／`wp @別名` 帶
-//     `wp db import|reset|drop` 或 `wp search-replace`。**回 `ask` 不擋**（stdout 印 `permissionDecision: "ask"`、
-//     exit 0）：部署是日常，要的是使用者看一眼目的地。官方文件寫明 `ask` 在 auto mode 仍會跳確認
-//     （https://code.claude.com/docs/en/hooks）。**放行** `rsync -n`、拉回本機、`wp … db export` 這類讀取。
+//     `wp db import|reset|drop` 或 `wp search-replace`。要的是使用者看一眼目的地。
+//     **放行** `rsync -n`、拉回本機、`wp … db export` 這類讀取。
 //     **不涵蓋** `scp`、遠端 `rm`／`mysql`、`ssh h < script.sh`、`ssh h bash -s`、`sftp`、`git push`。
 //
-// **擋下不等於不准做**——是不准由 agent 代下，取得授權後請使用者自己執行，或改用 hint 給的可逆路徑。
+// **確認框就是授權**：使用者當場按允許＝當輪明確授權，不必再由使用者自己下指令。
 // 各類的正反例在 test/guard-bash.test.mjs。
 //
 // **逃生門 `CC_GUARD_BASH=off`**：整支停用。**只有使用者按得動**：讀 hook 進程自己的 `process.env`
 //   （帳號層 `settings.json` 的 `env`，或啟動 Claude Code 時的環境）；agent 在指令前寫 `CC_GUARD_BASH=off`
 //   只設到它自己的子 shell，本進程讀不到。設了要**重開 session** 才生效。
 // **逐類放行與擴充**（同樣只有使用者設得了、要重開 session）：
-//   · `CC_GUARD_BASH_ALLOW`：逗號分隔的類別鍵，列了的那類不擋。鍵：`force-push`、`no-verify`、`clean`、
-//     `reset`、`rebase`、`amend`、`branch-force`、`rm`、`remote-write`。擋下訊息會印命中的鍵。
+//   · `CC_GUARD_BASH_ALLOW`：逗號分隔的類別鍵，列了的那類不跳確認框。鍵：`force-push`、`no-verify`、`clean`、
+//     `reset`、`rebase`、`amend`、`branch-force`、`rm`、`remote-write`。確認框會印命中的鍵。
 //   · `CC_GUARD_BASH_DISPOSABLE`：追加可重生目錄名（例 `obj,.build,Pods`），內建清單不因此縮小。
 //
 // **解析失敗一律放行（fail open）**：壞掉時最糟是「攔不到」，而不是「所有 Bash 呼叫都死」。
@@ -135,7 +136,7 @@ function recursiveForce(tokens) {
 
 /**
  * 判一段（單一）指令該不該擋。回 null＝放行。
- * 回 { rule, why, hint } ＝擋，三個欄位都會進 stderr 給模型看。
+ * 回 { key, rule, why, hint } ＝要使用者確認，rule／why／hint 都會寫進確認框。
  */
 export function classifySegment(segment, opts = {}) {
   const cmd = segment.trim();
@@ -146,7 +147,7 @@ export function classifySegment(segment, opts = {}) {
   const block = (key, hit) => (allow.has(key) ? null : { key, ...hit });
 
   const sub = gitSubcommand(tokens);
-  const AUTHORIZE = '要做請先取得使用者**當輪**明確授權，並由使用者自己下這道指令';
+  const AUTHORIZE = '確定要做就按允許';
 
   // 1. 遠端不可逆變更：強制推送（刪遠端分支不擋，見檔頭）
   if (sub === 'push') {
@@ -301,7 +302,7 @@ export function classifyCommand(command, opts = {}) {
 
 /**
  * 整個 tool_input 一起判：先跑逐段的 classifyCommand，再跑整條判的遠端寫入。
- * 回 null＝放行；回 { rule, why, hint }＝擋；帶 `decision: 'ask'`＝要使用者確認。
+ * 回 null＝放行；回 { key, rule, why, hint }＝要使用者確認。
  */
 export function classifyToolInput(toolInput, opts = {}) {
   const command = toolInput?.command;
@@ -318,7 +319,7 @@ const REMOTE_WRITE_ACTION = /\bwp\s[^|;&]*?\b(?:db\s+(?:import|reset|drop)|searc
 /**
  * 遠端寫入類（見檔頭）。整條指令一起判：`ssh h 'cd x && wp db import y'` 的引號內容會被
  * SEGMENT_SPLIT 拆散，逐段判會把 `wp db import` 當成本機指令。回 null＝放行；回帶
- * `decision: 'ask'` 的 hit ＝要使用者確認。
+ * hit ＝要使用者確認。
  */
 export function classifyRemoteWrite(command, opts = {}) {
   if (opts.allow?.has('remote-write')) return null;
@@ -326,7 +327,6 @@ export function classifyRemoteWrite(command, opts = {}) {
   const segments = text.split(SEGMENT_SPLIT);
   const hit = (rule, target) => ({
     key: 'remote-write',
-    decision: 'ask',
     rule,
     why: `往別台主機寫入（${target}），寫錯目的地會蓋掉別人的站或資料庫，本機 git 救不回來。`,
     hint: '先確認目的地現況（啟用主題、文章數、最近修改時間）再請使用者按確認；rsync 可先帶 `-n` 預演（本 hook 放行）。',
@@ -389,29 +389,18 @@ async function main() {
   const hit = classifyToolInput(payload.tool_input, opts);
   if (!hit) return 0;
 
-  // 遠端寫入類：不擋，交給使用者確認（理由見檔頭）。reason 會顯示在確認框給使用者看。
-  if (hit.decision === 'ask') {
-    console.log(JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'ask',
-        permissionDecisionReason: `${hit.rule}：${hit.why} ${hit.hint}`,
-      },
-    }));
-    return 0;
-  }
-
-  console.error(`⛔ PreToolUse 擋下：${hit.rule}（harness W7.3）`);
-  console.error(`   指令：${command.length > 200 ? `${command.slice(0, 200)}…` : command}`);
-  console.error(`   為什麼擋：${hit.why}`);
-  console.error(`   怎麼走：${hit.hint}`);
-  console.error('   規則出處：本檔檔頭註解。要放寬得改本檔，不是繞過。');
-  // 印實際路徑，家目錄縮成 ~；設了 CLAUDE_CONFIG_DIR 就印那個目錄。
+  // 命中一律跳確認框（理由見檔頭）。reason 顯示在框裡給使用者看。
   const home = process.env.HOME;
   const cfg = process.env.CLAUDE_CONFIG_DIR || (home ? join(home, '.claude') : '~/.claude');
   const settings = join(home && cfg.startsWith(`${home}/`) ? `~${cfg.slice(home.length)}` : cfg, 'settings.json');
-  console.error(`   若這是誤擋：請使用者在 ${settings} 的 env 設 "CC_GUARD_BASH_ALLOW": "${hit.key}"（只放行這一類）或 "CC_GUARD_BASH": "off"（整支停用），並重開 session（只有使用者設得了，agent 設不了）。`);
-  return 2; // PreToolUse：exit 2 ＝ 阻擋，stderr 回給模型
+  console.log(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'ask',
+      permissionDecisionReason: `${hit.rule}：${hit.why} ${hit.hint}（這類不想再被問：在 ${settings} 的 env 設 "CC_GUARD_BASH_ALLOW": "${hit.key}"，重開 session 生效）`,
+    },
+  }));
+  return 0;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

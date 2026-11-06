@@ -17,9 +17,7 @@ commands/cc-*.md                skill 家族（**唯一一份**，帳號層已�
 commands/html-explain.md        手動叫出：主題做成一頁 HTML（排版交給 vendor 的 am.mjs）
 vendor/answer-me-with-html/     上游 QingYunA/answer-me-with-html 0.5.10（aab9ea1）的 am.mjs＋授權，MIT；更新＝重新複製，改這行
 hooks/hooks.json                plugin 掛哪些 hook 以這檔為準
-hooks/session-start.sh          開場印常駐載入字元數
-hooks/guard-bash.mjs            PreToolUse(Bash) 攔不可逆指令、遠端寫入要確認（fail open）
-hooks/plan-approved.mjs         PostToolUse(ExitPlanMode) 計畫核准時提醒「做完派背景驗收」
+hooks/guard-bash.mjs            PreToolUse(Bash) 不可逆指令與遠端寫入跳確認框，使用者按允許才跑（fail open）
 templates/                      /cch-lite:cc-setup 安裝進 repo 的骨架（複製，不 symlink）
 tools/check_docs.py             文件水位與死指標七類判定（pre-commit 掛這支）
 tools/install-hooks.sh          把 templates/hooks/ 裝進當前 repo 的 .git/hooks/
