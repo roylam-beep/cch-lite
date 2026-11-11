@@ -19,7 +19,7 @@
 
 程序本文以 `/cc-close` 為準，本節不另寫程序。
 
-規劃用 Claude Code 的 plan mode；做完照計畫檔派背景驗收（`/cch-lite:cc-gate`）。
+規劃用 Claude Code 的 plan mode。要驗收就說「驗收」或打 `/cch-lite:cc-gate`：它派背景子 agent 照你要求的事驗，不會自動跑。
 
 ## BACKLOG queue 規則
 

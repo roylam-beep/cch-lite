@@ -1,5 +1,5 @@
 ---
-description: 獨立驗收：照 plan mode 的計畫檔驗這次做出來的東西。預設由做事的 session 派背景子 agent（Sonnet）跑、不擋使用者，結果回來再修，最多兩輪；也可在新 session 手動跑。只回報，不改檔。EN: acceptance check against the approved plan, background reviewer
+description: 獨立驗收：照使用者這次要求的事（有 plan mode 計畫檔就照計畫檔）驗做出來的東西。使用者說「驗收」「照我說的驗一下」或打 /cc-gate 才跑；跑的時候派背景子 agent（Sonnet）、不擋使用者，結果回來再修，最多兩輪。只回報，不改檔。只找程式 bug 用 /code-review。EN: acceptance check against what was asked, background reviewer
 argument-hint: "[可選：計畫檔路徑；或聚焦範圍；寫 opus 改用 Opus]"
 allowed-tools: Bash, Read, Glob, Grep
 ---
@@ -8,19 +8,29 @@ allowed-tools: Bash, Read, Glob, Grep
 
 價值全來自「跑的人不是寫的人」——寫的人帶著寫錯時的同一組假設，自己驗不出「跑得動但語意錯」。
 
+## 什麼時候跑
+
+使用者說了才跑：「驗收」「照我說的驗一下」「做完了，對一下有沒有照我要的做」，或直接打 `/cc-gate`。
+不自己決定要不要派——以前靠做事的 session 記得自派，實測幾乎沒派過（`docs/decisions.md`）。
+
 ## 怎麼派
 
-做事的 session 不自己驗：計畫做完就用 Agent 工具派子 agent 照本檔跑，
+被叫到的 session 不自己驗：用 Agent 工具派子 agent 照本檔跑，
 `model: "sonnet"`（使用者說要嚴格或寫 `opus` 才用 `"opus"`）、`run_in_background: true`，派完照常回報、不等它。
-prompt 只給本檔路徑（先跑 `ls "${CLAUDE_PLUGIN_ROOT}/commands/cc-gate.md"` 拿絕對路徑）、計畫檔路徑、動過的檔案清單，
+prompt 只給四樣：本檔路徑（先跑 `ls "${CLAUDE_PLUGIN_ROOT}/commands/cc-gate.md"` 拿絕對路徑）、
+**使用者這次要求的原話（逐字貼，不改寫）**、計畫檔路徑（有才給）、動過的檔案清單。
 **不轉述這輪經過**——轉述就把寫的人的假設帶過去了。結果回來：缺陷當場修，修完同樣再派一次，最多兩輪；
 第二輪仍有缺陷就停，列給使用者。使用者在新 session 打 `/cc-gate` 也算乾淨 context。
 
 ## 驗什麼
 
-1. **先抽完成條件。** 讀計畫檔（`$ARGUMENTS` 給的路徑；沒給就是 plan mode 存檔處最新那份，
-   預設 `~/.claude/plans/`，設定 `plansDirectory` 會改位置）。從計畫抽 3–7 條**可打勾打叉**的完成條件，
-   先列出來再驗。沒有計畫檔就讀交接單的「完成定義」；都沒有就自己寫一份，並在結論標明是你補的。
+1. **先抽完成條件。** 來源照這個順序，前面有就不往後找：
+   - `$ARGUMENTS` 給的計畫檔路徑；
+   - 派你的人貼的**使用者原話**，加上 `git diff`（看實際動了什麼）；
+   - plan mode 存檔處最新那份（預設 `~/.claude/plans/`，設定 `plansDirectory` 會改位置），**只在它講的是同一件事時**才用；
+   - 交接單的「完成定義」。
+
+   抽 3–7 條**可打勾打叉**的完成條件，先列出來再驗。都沒有就自己寫一份，並在結論標明是你補的。
 2. **逐條實跑。** 每條附實際指令輸出或 `檔案:行號`。宣稱跑過的檢查自己再跑一次，看報告不算。
    同一檢查最多跑兩次，第二次仍失敗即記 blocked，不繞路。
 3. **有界。** 自動化抓的是「跑不動」，本支只報「跑得動但結果錯」：
@@ -31,15 +41,29 @@ prompt 只給本檔路徑（先跑 `ls "${CLAUDE_PLUGIN_ROOT}/commands/cc-gate.m
 ## 約束
 
 - **不改任何檔。** 想動手修就是搞錯角色：缺陷回報給派你的 session，由它修。
-- 只作用於當前 repo；計畫動到兩個 repo 就各驗一次，沒驗的那個在結論明列。
+- 只作用於當前 repo；動到兩個 repo 就各驗一次，沒驗的那個在結論明列。
 - 不確定標 `[需確認]`。缺陷與範圍外發現分開列，混在一起等於把缺陷埋了。
+- 跟 `/code-review` 的分界：那支找程式寫錯的地方；本支對的是「有沒有照要求做到」。
 
 ## 回報
 
 第一行判定三選一：`gate: passes with nothing to fix`／`gate: <最嚴重那條缺陷一句>`／`gate: blocked on <什麼>`。
 接著：抽出的完成條件（逐條 ✔／✘＋證據）、缺陷（重現方式＋`檔案:行號`）、範圍外發現、哪些沒跑。
 
+一份合格回報長這樣（結構，不是內容）：
+
+```
+gate: 預設值沒改到——留空時仍送舊欄位名
+完成條件（來源：使用者原話＋git diff）
+✔ 1. 設定頁多一個「每日上限」欄位 — src/settings.tsx:88
+✘ 2. 留空時不送這個欄位 — 實跑 `npm test -- settings` 送出 {dailyCap: ""}，src/api.ts:41
+✔ 3. 舊資料不受影響 — 實跑 migration dry-run，0 筆變動
+缺陷：第 2 條。重現：欄位留空按儲存。src/api.ts:41
+範圍外：src/api.ts:60 有一個沒用到的 import
+沒跑：實機瀏覽器（沒有啟動指令）
+```
+
 ## 防什麼
 
-寫的人帶著寫錯時的同一組假設自己驗收，「跑得動但語意錯」漏過去；
-驗收太慢或要人記得叫，結果就是沒人驗。
+寫的人帶著寫錯時的同一組假設自己驗收，「跑得動但語意錯」漏過去。
+也防：說明寫「做完會自動派」，實際沒人派，使用者以為有人驗過。
