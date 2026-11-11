@@ -7,7 +7,7 @@
 // **照 shell 的讀法拆指令再判**（parseShell）：引號裡的字是資料不是指令、反斜線換行接成同一行、
 // `&&`／`;`／`|`／`&`／換行／`( )`／`{ }` 各自成段，`$(…)`／反引號／`<(…)` 裡的指令也拆出來判。
 // 判的是**排在指令位置的那個字**：前面的 `FOO=1`、`sudo -u root`、`env`、`xargs -n 1`、`nice -n 10`、
-// `timeout 5` 這類外包先剝掉，`/bin/rm` 只看檔名；`bash -c '…'`、`eval …`、`bash <<EOF` 的內文再拆一層。
+// `timeout 5` 這類外包先剝掉，`/bin/rm` 只看檔名；`bash -c '…'`、`eval …`、`bash <<EOF`、`ssh 主機 '…'` 的內文再拆一層。
 // 所以 `echo git push --force`、commit 訊息裡提到 `--amend` 不會命中（那些字不在指令位置）。
 // 命中＝stdout 印 `permissionDecision: "ask"`、exit 0：跳確認框，理由＋替代做法寫在框裡，**使用者按允許才執行**、
 // 按拒絕就不跑。官方文件寫明 `ask` 在 auto mode 仍會跳確認（https://code.claude.com/docs/en/hooks）。
@@ -21,8 +21,9 @@
 //   · `rm` 旗標同時含 r 與 f。**放行**（所有目標都符合才放）：(a) 暫存區——路徑先代入變數、解掉 `..`，
 //     再看是不是以 SCRATCHPAD_PREFIXES 開頭，或有一層**剛好**叫 `scratchpad`；
 //     (b) repo 內可重生目錄（DISPOSABLE_NAMES 與 `.tmp-*` 層名）。絕對路徑與帶 `..` 的相對路徑不吃 (b)。
-//     路徑裡的變數：同一條指令裡先寫死的（`D=/tmp/claude-1/x; rm -rf "$D"`）與 hook 進程環境有的（`$HOME`）
-//     會代入再判；代不出來的（迴圈變數、`$(…)`、空字串）一律問——不知道刪的是哪裡。
+//     路徑裡的變數：**只代同一條指令裡寫死的**（`D=/tmp/claude-1/x; rm -rf "$D"`），不讀環境變數。
+//     同一個名字設過好幾次就每個值都要過關；被 `for`／`read`／`unset`／`source`／`eval` 動過、沒設過、
+//     空字串、`$(…)`、`$HOME`、`~` 一律問——不知道刪的是哪裡。子 shell 裡設的值出不來。
 //   · `git commit --no-verify`／`-n`（含併寫 `-nm`）、`git push --no-verify` — 拆掉 pre-commit／pre-push 那道防線。
 //     **放行** `git push -n`（那是 `--dry-run`）。
 //   · `git clean` 帶 force — 未追蹤檔救不回來。**放行** `-n`／`--dry-run`、不帶 force、`-X`（只刪 ignore 的
@@ -30,11 +31,12 @@
 //   · **遠端寫入**（鍵 `remote-write`）— `rsync` 目的地是 `host:路徑`；`ssh`／`wp --ssh=…`／`wp @別名` 帶
 //     `wp db import|reset|drop` 或 `wp search-replace`。要的是使用者看一眼目的地。
 //     **放行** `rsync -n`、拉回本機、`wp … db export` 這類讀取。
-//     **不涵蓋** `scp`、遠端 `rm`／`mysql`、`ssh h < script.sh`、`ssh h bash -s`、`sftp`、`git push`。
+//     **不涵蓋** `scp`、遠端 `mysql`、`ssh h < script.sh`、`ssh h bash -s`、`sftp`、`git push`。
+//     遠端的 `rm -rf` 不算這一類，但 `ssh 主機 '…'` 的內文會照上面各類再判一次，所以照 `rm` 那類問；`rm -f` 放行。
 //   · git 的長旗標接受唯一縮寫（`--amen`＝`--amend`），會擋的那幾個旗標連縮寫一起認。
 //
 // **拆不到的地方（照樣放行）**：script 檔的內容（`bash x.sh`）、別名與 shell 函式、管線餵給 shell 的字串
-// （`echo … | sh`）、`ssh` 那頭的指令、`find -exec`／`-delete`、其他語言的一行程式（`python -c`）。
+// （`echo … | sh`）、`find -exec`／`-delete`、其他語言的一行程式（`python -c`）。
 //
 // **確認框就是授權**：使用者當場按允許＝當輪明確授權，不必再由使用者自己下指令。
 // 各類的正反例在 test/guard-bash.test.mjs。
@@ -88,10 +90,12 @@ const SUBSTITUTION = '$(…)';
 const MAX_NESTING = 40;
 
 /**
- * 把一條 shell 指令拆成「簡單指令」清單。回 `{ commands, bodies }`：
- *   · commands：`[{ words, inputs }]`。words ＝去掉引號後的每個字；inputs ＝餵給這個指令的
+ * 把一條 shell 指令拆成「簡單指令」清單。回 `{ commands, bodies, parents }`：
+ *   · commands：`[{ words, inputs, scope }]`。words ＝去掉引號後的每個字；inputs ＝餵給這個指令的
  *     heredoc 內文與 here-string（`[{ text }]`）。`$(…)`、反引號、`( )` 裡的指令也各自列一筆。
  *   · bodies：heredoc 內文（含結尾那行）在原字串裡的 `[start, end)`，給 stripHeredocs 用。
+ *   · parents：每個指令的 `scope` 是它所在那層的編號；`parents[編號]` ＝外面那層（最外層是 -1）。
+ *     `( )`、`$(…)`、反引號、`<(…)` 各開一層——裡面設的變數出不來，外面設的裡面看得到。
  *
  * 不是完整的 shell 文法，只做到「分得出哪個字排在指令位置、哪些字是資料」。遇到看不懂的
  * 寫法就照字面往下走，不丟例外。
@@ -102,6 +106,8 @@ export function parseShell(source) {
   const commands = [];
   const bodies = [];
   let pending = []; // 看到 `<<EOF` 了、等下一個換行才讀內文的 heredoc
+  const parents = [-1];
+  let scope = 0;
   let nesting = 0;
   let i = 0;
 
@@ -267,10 +273,12 @@ export function parseShell(source) {
   /** 讀一串指令，直到 closer（`)` 或反引號）或結尾。 */
   function list(closer) {
     nesting += 1;
-    let cur = { words: [], inputs: [], docs: 0 };
+    const outer = scope;
+    if (closer) { parents.push(scope); scope = parents.length - 1; }
+    let cur = { words: [], inputs: [], docs: 0, scope };
     const flush = () => {
       if (cur.words.length || cur.inputs.length || cur.docs) commands.push(cur);
-      cur = { words: [], inputs: [], docs: 0 };
+      cur = { words: [], inputs: [], docs: 0, scope };
     };
     while (i < n && nesting <= MAX_NESTING) {
       const c = src[i];
@@ -300,11 +308,12 @@ export function parseShell(source) {
       cur.words.push(text);
     }
     flush();
+    scope = outer;
     nesting -= 1;
   }
 
   list(null);
-  return { commands, bodies };
+  return { commands, bodies, parents };
 }
 
 /**
@@ -332,7 +341,10 @@ export function stripHeredocs(command) {
 
 const baseName = (word) => String(word ?? '').split('/').pop();
 
-const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)\+?=([\s\S]*)$/;
+const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)(\+?)=([\s\S]*)$/;
+/** `S[0]=x`：陣列的一格。不追陣列內容，只知道這個名字被動過。 */
+const ARRAY_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)\[[^\]]*\]\+?=/;
 
 /** 排在真正指令前面的 shell 關鍵字，剝掉再判（`then rm -rf …`、`{ rm -rf …; }`）。 */
 const KEYWORDS = new Set(['if', 'then', 'elif', 'else', 'while', 'until', 'do', '!', '{', '}']);
@@ -364,21 +376,92 @@ export const WRAPPERS = {
 /** 會把字串當指令跑的 shell。`-c` 後面的字串、餵進去的 heredoc 都要再拆一層。 */
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
 
+/** ssh 自己的選項裡，值寫在下一個字的那幾個。跳過它們才找得到主機名，主機名後面就是要在那頭跑的指令。 */
+const SSH_VALUED = new Set(['-B', '-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-Q', '-R', '-S', '-W', '-w']);
+
 /** `bash -c "bash -c '…'"` 最多往裡拆幾層。 */
 const MAX_DEPTH = 4;
 
-/** 代入變數與開頭的 `~`。代不出來（沒設、空字串）就原樣留著 `$NAME`，讓呼叫端知道。 */
-function expand(text, vars, env) {
-  const lookup = (name) => (vars?.has(name) ? vars.get(name) : env?.[name]);
-  let out = String(text).replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, braced, bare) => {
-    const value = lookup(braced ?? bare);
-    return typeof value === 'string' && value !== '' ? value : whole;
-  });
-  if (out === '~' || out.startsWith('~/')) {
-    const home = lookup('HOME');
-    if (typeof home === 'string' && home.startsWith('/')) out = home + out.slice(1);
+/** shell 自己會改的變數：寫死也不算數（`cd` 之後 `$PWD` 就變了）。 */
+const SHELL_OWNED = new Set(['PWD', 'OLDPWD', 'REPLY', 'OPTARG', 'OPTIND', 'RANDOM', 'SECONDS', 'LINENO', '_']);
+
+/** 會把外面來的值塞進變數的內建。塞進去的值看不到，那個名字從此代不出來。 */
+const REBINDERS = new Set(['read', 'unset', 'mapfile', 'readarray', 'getopts']);
+
+/** 會跑一段看不到的內容（可能改任何變數）的內建。之後這一層的變數全部不代。 */
+const OPAQUE = new Set(['source', '.', 'eval']);
+
+/**
+ * 一層 shell 裡看得到的變數。**只記同一條指令裡寫死的**（`S=/tmp/claude-1/x`），不讀環境變數——
+ * hook 進程的環境不等於那條指令跑的時候的環境，而代錯的方向是「該問的沒問」。
+ *
+ * 一個名字記的是**所有設過的值**，不是最後一個：`[ -n "$X" ] && S=/a` 這種有條件的設值，
+ * 看字面分不出哪一個生效，所以每個可能都要過關才放行。null ＝這個名字有一次代不出來
+ * （`for S in …`、`read S`、`unset S`）。子 shell 往外看得到外層的值，自己設的不會流出去。
+ */
+class Scope {
+  constructor(parent = null) {
+    this.parent = parent;
+    this.values = new Map();
+    this.opaque = false;
   }
-  return out;
+
+  /** 這個名字所有可能的值；回 null＝沒設過，或這一層跑過看不到內容的東西。 */
+  candidates(name) {
+    if (SHELL_OWNED.has(name)) return null;
+    let found = null;
+    for (let s = this; s; s = s.parent) {
+      if (s.opaque) return null;
+      const own = s.values.get(name);
+      if (own) found = found ? [...found, ...own] : [...own];
+    }
+    return found;
+  }
+
+  add(name, values) {
+    this.values.set(name, [...new Set([...(this.values.get(name) ?? []), ...values])]);
+  }
+
+  forget(name) { this.add(name, [null]); }
+}
+
+/** 整個字就是一個變數（`$SSH`、`${SSH}`）。 */
+const WHOLE_VARIABLE = /^\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)$/;
+
+const VARIABLE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+
+/**
+ * 把字裡的 `$NAME`／`${NAME}` 代成值，回**所有可能的結果**。回 null＝有變數代不出來
+ * （沒設過、空字串、被 for／read 改過），或組合太多。`$1`、`${x:-y}`、`$(…)` 不是這裡認得的寫法，
+ * 原樣留在結果裡——呼叫端看到結果還有 `$` 就知道沒代完。
+ */
+function expansions(text, vars) {
+  let results = [''];
+  let last = 0;
+  for (const m of String(text).matchAll(VARIABLE)) {
+    const values = vars?.candidates(m[1] ?? m[2]);
+    if (!values || values.some((v) => typeof v !== 'string' || v === '')) return null;
+    const literal = text.slice(last, m.index);
+    results = results.flatMap((r) => values.map((v) => r + literal + v));
+    if (results.length > 32) return null;
+    last = m.index + m[0].length;
+  }
+  return results.map((r) => r + String(text).slice(last));
+}
+
+/** `NAME=值` → 記進這一層。`+=` 是接在原本每個可能的值後面；原本沒值就算代不出來。 */
+function assign(word, vars) {
+  const m = ASSIGNMENT.exec(word);
+  if (!m || !vars) return;
+  const [, name, plus, raw] = m;
+  let values = expansions(raw, vars) ?? [null];
+  if (plus) {
+    const before = vars.candidates(name);
+    values = before && !before.includes(null) && !values.includes(null)
+      ? before.flatMap((b) => values.map((v) => b + v)).slice(0, 32)
+      : [null];
+  }
+  vars.add(name, values);
 }
 
 /**
@@ -386,23 +469,38 @@ function expand(text, vars, env) {
  * 順手記下**整段只有設變數**的那種（`D=/x`、`export D=/x`）到 vars，後面的 `rm -rf "$D"` 才代得出來。
  * `FOO=1 rm …` 的 FOO 只給 rm 當環境，不影響同一行的 `$FOO`，所以不記。
  */
-function unwrap(words, vars, env) {
+function unwrap(words, vars) {
   let rest = words;
   for (let guard = 0; rest.length && guard < 30; guard += 1) {
     let k = 0;
-    while (k < rest.length && ASSIGNMENT.test(rest[k])) k += 1;
+    while (k < rest.length && (ASSIGNMENT.test(rest[k]) || ARRAY_ASSIGNMENT.test(rest[k]))) k += 1;
     if (k > 0) {
       if (k === rest.length) {
-        for (const w of rest) { const m = ASSIGNMENT.exec(w); vars?.set(m[1], expand(m[2], vars, env)); }
+        for (const w of rest) {
+          const array = ARRAY_ASSIGNMENT.exec(w);
+          if (array) vars?.forget(array[1]);
+          else assign(w, vars);
+        }
         return [];
       }
       rest = rest.slice(k);
       continue;
     }
     if (KEYWORDS.has(rest[0])) { rest = rest.slice(1); continue; }
+    // 指令本身放在變數裡（`SSH="ssh -o X"; $SSH host '…'`、`RM='rm -rf'; $RM docs`）：只有一個可能的值才攤開來判
+    if (WHOLE_VARIABLE.test(rest[0])) {
+      const values = expansions(rest[0], vars);
+      if (values?.length !== 1 || !values[0].trim()) break;
+      rest = [...values[0].trim().split(/\s+/), ...rest.slice(1)];
+      continue;
+    }
     const head = baseName(rest[0]);
     if (DECLARES.has(head)) {
-      for (const w of rest.slice(1)) { const m = ASSIGNMENT.exec(w); if (m) vars?.set(m[1], expand(m[2], vars, env)); }
+      for (const w of rest.slice(1)) {
+        if (ASSIGNMENT.test(w)) assign(w, vars);
+        // `local S`／`declare S` 不帶值＝在這裡變成空的；`export S` 不改值
+        else if (NAME.test(w) && head !== 'export' && head !== 'readonly') vars?.forget(w);
+      }
       return [];
     }
     const spec = Object.hasOwn(WRAPPERS, head) ? WRAPPERS[head] : null;
@@ -413,6 +511,17 @@ function unwrap(words, vars, env) {
     rest = rest.slice(k + (spec.positional ?? 0));
   }
   return rest;
+}
+
+/** 這個指令會不會改掉變數：會的話把名字標成代不出來，免得後面的 `rm -rf "$S"` 拿舊值去判。 */
+function trackRebinding(words, vars) {
+  if (!words.length || !vars) return;
+  const head = baseName(words[0]);
+  const args = words.slice(1);
+  if (head === 'for' || head === 'select') { if (args[0]) vars.forget(args[0]); return; }
+  if (REBINDERS.has(head)) { for (const a of args) if (NAME.test(a)) vars.forget(a); return; }
+  if (head === 'printf') { const at = args.indexOf('-v'); if (at !== -1 && args[at + 1]) vars.forget(args[at + 1]); return; }
+  if (OPAQUE.has(head)) vars.opaque = true;
 }
 
 // ───────────────────────── 各類規則 ─────────────────────────
@@ -491,23 +600,39 @@ function looksScratchpad(path) {
   return path.split('/').includes(SCRATCHPAD_DIRNAME);
 }
 
-/**
- * 這個 rm 目標可不可以放行。暫存區＝可以；repo 內的可重生目錄＝可以；其餘擋。
- * 先代入變數、解掉 `.` 與 `..` 再比——`/tmp/claude-1/../../Users/x` 實際刪的是 `/Users/x`。
- *
- * **絕對路徑與帶 `..` 的相對路徑不吃名字白名單**：`/var/tmp`、`../../node_modules`
- * 的層名雖然在清單裡，但目標在當前 repo 外，那是另一回事。
- * **代不出來的變數一律不放行**：`$DIR/build` 不知道 `$DIR` 是哪裡，空字串時就是 `/build`。
- */
-export function disposableTarget(arg, extra = [], ctx = {}) {
-  const expanded = expand(arg, ctx.vars, ctx.env);
-  if (/[$`]/.test(expanded) || expanded.startsWith('~')) return false;
-  const path = posix.normalize(expanded);
+/** 一條**已經代完變數**的路徑可不可以放行。先解掉 `.` 與 `..` 再比。 */
+function disposablePath(text, extra) {
+  if (/[$`]/.test(text) || text.startsWith('~')) return false; // 還有沒代完的；`~` 一定在 repo 外
+  const path = posix.normalize(text);
   if (looksScratchpad(path)) return true;
   if (path.startsWith('/')) return false;
   const segments = path.split('/').filter(Boolean);
   if (segments.includes('..')) return false;
   return segments.some((seg) => DISPOSABLE_NAMES.has(seg) || extra.includes(seg) || TMP_SEGMENT.test(seg));
+}
+
+/**
+ * 這個 rm 目標可不可以放行。暫存區＝可以；repo 內的可重生目錄＝可以；其餘擋。
+ * 先代入變數、解掉 `.` 與 `..` 再比——`/tmp/claude-1/../../Users/x` 實際刪的是 `/Users/x`。
+ *
+ * **絕對路徑、`~` 開頭、帶 `..` 的相對路徑不吃名字白名單**：`/var/tmp`、`../../node_modules`
+ * 的層名雖然在清單裡，但目標在當前 repo 外，那是另一回事。
+ * **代不出來的變數一律不放行**：`$DIR/build` 不知道 `$DIR` 是哪裡，空字串時就是 `/build`。
+ * 變數有好幾個可能的值時，**每一個**都要過關。vars 不給＝字面上有變數就不放行。
+ */
+export function disposableTarget(arg, extra = [], vars = null) {
+  const paths = expansions(arg, vars);
+  return paths !== null && paths.every((path) => disposablePath(path, extra));
+}
+
+/** 這個指令是不是 `rm` 帶 r＋f；是就回它要刪的目標（可能是空陣列），不是回 null。 */
+function rmTargets(words) {
+  if (baseName(words[0]) !== 'rm') return null;
+  const rest = words.slice(1);
+  const cut = rest.indexOf('--'); // `--` 之後全是路徑，`-` 開頭的也是
+  const flags = cut === -1 ? rest : rest.slice(0, cut);
+  if (!recursiveForce(flags)) return null;
+  return [...flags.filter((t) => !t.startsWith('-')), ...(cut === -1 ? [] : rest.slice(cut + 1))];
 }
 
 /** rm 的旗標同時含 r 與 f（含 -rf／-fr／-r -f／--recursive --force）才算不可逆遞迴刪除。 */
@@ -529,8 +654,7 @@ function recursiveForce(tokens) {
  * 判一個簡單指令（已拆成字）該不該擋。回 null＝放行。
  * 回 { key, rule, why, hint } ＝要使用者確認，rule／why／hint 都會寫進確認框。
  */
-function classifyWords(rawWords, inputs, opts, state) {
-  const words = unwrap(rawWords, state.vars, opts.env);
+function classifyWords(words, inputs, opts, state) {
   if (!words.length) return null;
   const head = baseName(words[0]);
   const allow = opts.allow ?? new Set();
@@ -641,28 +765,22 @@ function classifyWords(rawWords, inputs, opts, state) {
   }
 
   // 8. rm -rf（暫存區與可重生目錄放行）
-  if (head === 'rm') {
-    const rest = words.slice(1);
-    const cut = rest.indexOf('--'); // `--` 之後全是路徑，`-` 開頭的也是
-    const flags = cut === -1 ? rest : rest.slice(0, cut);
-    if (recursiveForce(flags)) {
-      const targets = [...flags.filter((t) => !t.startsWith('-')), ...(cut === -1 ? [] : rest.slice(cut + 1))];
-      const extra = opts.disposable ?? [];
-      const ctx = { vars: state.vars, env: opts.env };
-      const blocked = targets.filter((t) => !disposableTarget(t, extra, ctx));
-      if (blocked.length > 0 || targets.length === 0) {
-        const unknown = blocked.some((t) => /[$`]/.test(expand(t, ctx.vars, ctx.env)));
-        const hit = block('rm', {
-          rule: 'rm -rf',
-          why: `不可逆遞迴刪除，目標既不在 scratchpad 也不是可重生目錄（${blocked.join(' ') || '未指定路徑'}）。${unknown ? '路徑裡有代不出來的變數，判不出刪的是哪裡。' : ''}`,
-          hint: `暫存檔放 scratchpad（路徑以 ${SCRATCHPAD_PREFIXES.join(' 或 ')} 開頭，或有一層叫 ${SCRATCHPAD_DIRNAME}）或取名 \`.tmp-*\`，本 hook 放行；\`node_modules\`／\`dist\` 這類可重生目錄也放行。版控檔用 \`git rm\`。其餘先問使用者。`,
-        });
-        if (hit) return hit;
-      }
+  const targets = rmTargets(words);
+  if (targets) {
+    const extra = opts.disposable ?? [];
+    const blocked = targets.filter((t) => !disposableTarget(t, extra, state.vars));
+    if (blocked.length > 0 || targets.length === 0) {
+      const unknown = blocked.some((t) => (expansions(t, state.vars) ?? ['$']).some((path) => /[$`]/.test(path)));
+      const hit = block('rm', {
+        rule: 'rm -rf',
+        why: `不可逆遞迴刪除，目標既不在 scratchpad 也不是可重生目錄（${blocked.join(' ') || '未指定路徑'}）。${unknown ? '路徑裡有代不出來的變數，判不出刪的是哪裡。' : ''}`,
+        hint: `暫存檔放 scratchpad（路徑以 ${SCRATCHPAD_PREFIXES.join(' 或 ')} 開頭，或有一層叫 ${SCRATCHPAD_DIRNAME}）或取名 \`.tmp-*\`，本 hook 放行；\`node_modules\`／\`dist\` 這類可重生目錄也放行。版控檔用 \`git rm\`。其餘先問使用者。`,
+      });
+      if (hit) return hit;
     }
   }
 
-  // 9. 把字串當指令跑的：`bash -c '…'`、`bash <<EOF`、`eval …`——內文再拆一層判。
+  // 9. 把字串當指令跑的：`bash -c '…'`、`bash <<EOF`、`eval …`、`ssh 主機 '…'`——內文再拆一層判。
   if (state.depth < MAX_DEPTH) {
     const rest = words.slice(1);
     const scripts = [];
@@ -673,6 +791,13 @@ function classifyWords(rawWords, inputs, opts, state) {
       for (const input of inputs) scripts.push(input.text);
     }
     if (head === 'eval') scripts.push(rest.join(' '));
+    if (head === 'ssh') {
+      // 那頭的指令照同一套規則判：遠端的 `rm -rf`、`git reset --hard` 本機 git 一樣救不回來。
+      // 那頭的變數這裡看不到，所以 `rm -rf $T` 一律問；`rm -f` 清單檔照舊放行。
+      let k = 0;
+      while (k < rest.length && rest[k].startsWith('-')) k += SSH_VALUED.has(rest[k]) ? 2 : 1;
+      if (rest.length > k + 1) scripts.push(rest.slice(k + 1).join(' '));
+    }
     for (const script of scripts) {
       const hit = classifyCommand(script, opts, state.depth + 1);
       if (hit) return hit;
@@ -682,15 +807,40 @@ function classifyWords(rawWords, inputs, opts, state) {
   return null;
 }
 
+/**
+ * 照順序走過一條指令裡的每個簡單指令：剝掉外包、記變數，再把「從真正的指令開始的字」交給 visit。
+ * visit 回非 undefined 的值就停下來把它傳回去。
+ */
+function walkCommands(command, visit) {
+  const { commands, parents } = parseShell(command);
+  const scopes = [];
+  const scopeOf = (id) => (scopes[id] ??= new Scope(parents[id] >= 0 ? scopeOf(parents[id]) : null));
+  for (const { words: raw, inputs, scope } of commands) {
+    const vars = scopeOf(scope);
+    const words = unwrap(raw, vars);
+    const result = visit(words, inputs, vars);
+    if (result !== undefined && result !== null) return result;
+    trackRebinding(words, vars);
+  }
+  return null;
+}
+
 /** 拆複合指令逐段判——`cd x && <遞迴刪除>` 這種靠只看首個 token 是抓不到的。 */
 export function classifyCommand(command, opts = {}, depth = 0) {
   if (typeof command !== 'string') return null;
-  const state = { vars: new Map(), depth };
-  for (const { words, inputs } of parseShell(command).commands) {
-    const hit = classifyWords(words, inputs, opts, state);
-    if (hit) return hit;
-  }
-  return null;
+  return walkCommands(command, (words, inputs, vars) => classifyWords(words, inputs, opts, { vars, depth }));
+}
+
+/**
+ * 給測試與比對工具用：列出這條指令（最外面那一層）每個 `rm -rf` 目標代入變數後所有可能的路徑。
+ * paths 是 null＝有變數代不出來。
+ */
+export function resolveRmTargets(command) {
+  const found = [];
+  walkCommands(String(command ?? ''), (words, _inputs, vars) => {
+    for (const target of rmTargets(words) ?? []) found.push({ target, paths: expansions(target, vars) });
+  });
+  return found;
 }
 
 /**
@@ -723,7 +873,7 @@ export function classifyRemoteWrite(command, opts = {}) {
   });
 
   for (const command_ of parseShell(command).commands) {
-    const tokens = unwrap(command_.words, null, opts.env);
+    const tokens = unwrap(command_.words, null);
     const head = baseName(tokens[0]);
     if (head === 'rsync') {
       if (tokens.includes('--dry-run') || hasShortFlag(tokens, 'n')) continue;
@@ -747,13 +897,12 @@ export function classifyRemoteWrite(command, opts = {}) {
 
 /**
  * 使用者設定 → 各 classify 函式的 opts。只讀 hook 進程自己的環境（理由同逃生門，見檔頭）。
- * 全部沒設＝跟以前完全一樣。env 整包帶著，給 rm 的路徑代入 `$HOME` 這類變數用。
+ * 全部沒設＝跟以前完全一樣。
  */
 export function configFromEnv(env = {}) {
   return {
     allow: new Set(parseList(env.CC_GUARD_BASH_ALLOW)),
     disposable: parseList(env.CC_GUARD_BASH_DISPOSABLE),
-    env,
   };
 }
 

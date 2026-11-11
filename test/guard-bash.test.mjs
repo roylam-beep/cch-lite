@@ -367,7 +367,7 @@ test("端對端：命中一律 stdout 印 permissionDecision ask、exit 0；放�
 
 // ───────── 2026-11-11：照 shell 的讀法拆指令（之前用空白切字，下面每一條都漏或誤攔） ─────────
 
-import { parseShell, disposableTarget } from "../hooks/guard-bash.mjs";
+import { parseShell, disposableTarget, resolveRmTargets } from "../hooks/guard-bash.mjs";
 
 const HOME_ENV = configFromEnv({ HOME: "/Users/me" });
 
@@ -581,7 +581,7 @@ test("路徑裡的變數：代得出來就照代入後的路徑判，代不出�
     assert.equal(classifyCommand(cmd, HOME_ENV), null, `誤擋：${cmd}`);
   }
   for (const cmd of [
-    "rm -rf $HOME/Documents/build",          // 代入後是絕對路徑，不吃名字清單
+    "rm -rf $HOME/Documents/build",          // 環境變數不代，一律問
     "rm -rf \"$HOME\"/node_modules",
     "rm -rf ${HOME}/tmp",
     "rm -rf $UNKNOWN/build",                 // 代不出來
@@ -597,7 +597,96 @@ test("路徑裡的變數：代得出來就照代入後的路徑判，代不出�
   }
   assert.ok(classifyCommand("rm -rf $UNKNOWN/build").why.includes("代不出來"), "確認框要講是變數代不出來");
   assert.equal(classifyCommand("rm -rf ~/Documents/build", HOME_ENV)?.key, "rm");
-  assert.equal(classifyCommand(`rm -rf ~/scratch`, configFromEnv({ HOME: SCRATCH })), null, "HOME 本身在暫存區時 ~ 代入後放行");
+});
+
+test("ssh 那頭的指令照同一套規則再判一次", () => {
+  for (const [cmd, key] of [
+    ["ssh host 'rm -rf ~/public_html/site'", "rm"],
+    ["ssh host rm -rf /var/www", "rm"],
+    ["ssh -p 2222 -o BatchMode=yes deploy@host \"cd ~/backups; rm -v a.sql; rm -rf old\"", "rm"],
+    ["ssh host 'T=$(mktemp -d) && cp x $T && rm -rf $T'", "rm"],      // 那頭的變數這裡看不到
+    ["scp a host:/tmp/ && ssh host 'cd /srv && git reset --hard'", "reset"],
+    ["ssh host 'cd /srv && wp db import x.sql'", "remote-write"],
+  ]) {
+    assert.equal(classifyToolInput({ command: cmd })?.key, key, `未擋：${cmd}`);
+  }
+  for (const cmd of [
+    "ssh host ls -la /var/www",
+    "ssh host",
+    "ssh -p 2222 host 'tail -n 50 log'",
+    "ssh host 'rm -f /tmp/b.webp'",                                   // 清單檔照舊放行（2026-10-26 收窄）
+    "ssh host 'cd /srv/app && rm -rf node_modules && npm ci'",
+    "ssh host 'grep -c \"rm -rf\" deploy.sh'",
+    "ssh-keygen -t ed25519 -f k",
+  ]) {
+    assert.equal(classifyToolInput({ command: cmd }), null, `誤擋：${cmd}`);
+  }
+});
+
+test("指令本身放在變數裡：只有一個可能的值就攤開來判", () => {
+  for (const [cmd, key] of [
+    ["RM='rm -rf'; $RM docs", "rm"],
+    ["G=git; $G push --force", "force-push"],
+    ["SSH=\"ssh -o BatchMode=yes -o ConnectTimeout=12\"; $SSH host 'mkdir -p ~/up' && $SSH host \"cd /srv; rm -rf ~/up\"", "rm"],
+    ["CMD=\"sudo rm\"; ${CMD} -rf /etc", "rm"],
+  ]) {
+    assert.equal(classifyToolInput({ command: cmd })?.key, key, `未擋：${cmd}`);
+  }
+  for (const cmd of ["X=ls; $X -la", "$UNKNOWN -rf docs", "SSH='ssh -o BatchMode=yes'; $SSH host ls", "PY=python3; $PY -c 'print(1)'"]) {
+    assert.equal(classifyToolInput({ command: cmd }), null, `誤擋：${cmd}`);
+  }
+});
+
+test("環境變數不拿來代：hook 進程的環境不等於指令跑的時候的環境", () => {
+  // 代錯的方向是「該問的沒問」，所以就算環境裡的值指向暫存區也不代。
+  const env = configFromEnv({ HOME: SCRATCH, TMPDIR: SCRATCH, PWD: SCRATCH, S: SCRATCH });
+  for (const cmd of ["rm -rf ~/x", "rm -rf $HOME/x", "rm -rf $TMPDIR/x", "rm -rf $PWD/x", "rm -rf $S/x", "cd /Users/me && rm -rf $PWD/x"]) {
+    assert.equal(classifyCommand(cmd, env)?.key, "rm", `未擋：${cmd}`);
+  }
+  // 連寫死的 PWD 也不代：cd 之後 shell 自己會改它
+  assert.equal(classifyCommand(`PWD=${SCRATCH}; cd /Users/me; rm -rf $PWD`)?.key, "rm");
+});
+
+test("變數寫死之後又被改掉：不能拿舊值放行", () => {
+  for (const cmd of [
+    `S=${SCRATCH}; for S in /Users/me/x; do rm -rf "$S"; done`,
+    `S=${SCRATCH}; ls | while read S; do rm -rf "$S"; done`,
+    `S=${SCRATCH}; read -r S < f; rm -rf "$S"`,
+    `S=${SCRATCH}; IFS= read S; rm -rf $S`,
+    `S=${SCRATCH}; unset S; rm -rf "$S/"`,
+    `S=${SCRATCH}; printf -v S %s /Users/me; rm -rf $S`,
+    `S=${SCRATCH}; S[0]=/Users/me; rm -rf $S`,
+    `S=${SCRATCH}; f() { local S; rm -rf $S/x; }; f`,
+    `S=${SCRATCH}; mapfile -t S < f; rm -rf $S`,
+    `S=${SCRATCH}; source ./env.sh; rm -rf $S/x`,
+    `S=${SCRATCH}; . ./env.sh; rm -rf $S/x`,
+    `S=${SCRATCH}; eval "$(cat env)"; rm -rf $S/x`,
+    "D=/Users/me/; D+=tmp; rm -rf $D",                          // += 是接在後面，不是蓋掉
+    `S=/Users/me; [ -n "$CI" ] && S=${SCRATCH}; rm -rf $S/x`,   // 有條件的設值：兩個可能都要過關
+    `if [ -d x ]; then S=${SCRATCH}; else S=/Users/me; fi; rm -rf $S/x`,
+    `if [ -d x ]; then S=/Users/me; else S=${SCRATCH}; fi; rm -rf $S/x`,
+    `S=/Users/me; (S=${SCRATCH}; true); rm -rf $S/x`,           // 子 shell 裡設的值出不來
+    `(S=${SCRATCH}); rm -rf $S/x`,
+    `echo $(S=${SCRATCH}); rm -rf $S/x`,
+  ]) {
+    assert.equal(classifyCommand(cmd)?.key, "rm", `未擋：${cmd}`);
+  }
+  for (const cmd of [
+    `S=${SCRATCH}; (rm -rf $S/x)`,                               // 外層的值子 shell 看得到
+    `S=${SCRATCH}; (S=$S/sub; rm -rf $S/x)`,
+    `S=${SCRATCH}; S+=/more; rm -rf $S`,
+    `WT=${SCRATCH}/a; rm -rf $WT; WT=${SCRATCH}/b; rm -rf $WT`,  // 設兩次，兩個值都在暫存區
+    `S=${SCRATCH}; export S; rm -rf $S/x`,
+    `S=${SCRATCH}; for f in a b; do echo $f; done; rm -rf $S/x`, // 迴圈改的是別的名字
+    `S=${SCRATCH}; read -r LINE < f; rm -rf $S/x`,
+  ]) {
+    assert.equal(classifyCommand(cmd), null, `誤擋：${cmd}`);
+  }
+  assert.deepEqual(resolveRmTargets(`S=${SCRATCH}; rm -rf "$S/a" docs`), [
+    { target: "$S/a", paths: [`${SCRATCH}/a`] },
+    { target: "docs", paths: ["docs"] },
+  ]);
+  assert.equal(resolveRmTargets("rm -rf $NOPE/x")[0].paths, null);
 });
 
 test("拆不動的怪輸入不丟例外、不卡死", () => {
