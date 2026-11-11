@@ -1,7 +1,7 @@
 ---
-description: 指定一支 skill 做體檢：SkillEvaluator 的 9 項評分標準由 Claude 自己打分（不用 API）＋個資掃描＋查它跟哪支已裝 skill 搶觸發。唯讀，只回報不改。EN: audit one skill, score a skill, does this skill trigger right
+description: 審一支 skill 專用（audit／review／審／分析某支 skill 都走這支）：SkillEvaluator 的 9 項評分標準由 Claude 自己打分（不用 API）＋個資掃描＋查它跟哪支已裝 skill 搶觸發＋查它過去實際怎麼被叫、跟說明對不對得上。唯讀，只回報不改。EN: audit one skill, score a skill, does this skill trigger right, how is it actually used
 argument-hint: "<skill 名稱或路徑，例：content-audit、anthropic-skills:skill-auditor、./skills/foo>"
-allowed-tools: Read, Glob, Grep, Bash(find:*), Bash(ls:*)
+allowed-tools: Read, Glob, Grep, Bash(find:*), Bash(ls:*), Bash(grep:*)
 disallowed-tools: Write, Edit, NotebookEdit
 disable-model-invocation: true
 ---
@@ -58,6 +58,27 @@ find . ~/.claude/skills ~/.claude/commands ~/.claude/plugins/cache \
 拿這支的 description 跟本 session skill 清單裡其他 skill 比（清單在你的 context 裡，不另外讀檔）。
 只抓一種事：**同一句使用者的話，兩支都會接**。用途相近但觸發句分得開的不算。
 
+## 4. 實際怎麼被叫
+
+寫的人想的用法，跟使用者實際打的字常常對不上；這一步拿紀錄對。
+
+```bash
+n=<名稱>
+# 手打斜線時帶的參數（出現次數多的在前）
+grep -rhoE "$n</command-name>[^<]{0,40}<command-args>[^<]{0,120}" ~/.claude/projects --include='*.jsonl' 2>/dev/null \
+  | sed 's/.*<command-args>//' | sort | uniq -c | sort -rn | head -30
+# 手打總次數（含不帶參數的）／agent 自己叫的次數
+grep -rhoE "$n</command-name>" ~/.claude/projects --include='*.jsonl' 2>/dev/null | wc -l
+grep -rhoE "\"skill\": ?\"[^\"]*$n\"" ~/.claude/projects --include='*.jsonl' 2>/dev/null | wc -l
+```
+
+續接的 session 會重複計，次數只看相對大小；夾著指令字串的雜訊行略過。沒有逐字稿（cloud 常見）就寫「無紀錄」跳過。
+然後對三件事，各一句：
+
+- **參數**：實際打的字，`argument-hint` 與本文接不接得住（例：說明寫「指定一支」，實際打「全 repo 的 skill」）。
+- **誰在叫**：說明寫「主動用」卻幾乎都是手打，或設了 `disable-model-invocation` 卻被期待自動接。
+- **拿到的答案**：使用者的下一句是照做，還是追問、重講、罵——後者＝輸出格式對不上他要的。
+
 ## 輸出
 
 ```
@@ -65,6 +86,7 @@ find . ~/.claude/skills ~/.claude/commands ~/.claude/plugins/cache \
 總分 <N>/100（<通過／不通過>）｜個資 <通過／N 條>｜撞 <N> 支
 <九項一項一行：項目 分數/10 — 一句評語 [行號]>
 觸發模擬：該接 <5 句，各標 ✓✗>；不該接 <3 句，各標 ✓✗>
+實際用法：手打 <N> 次／agent 叫 <N> 次；對不上：<寫的 ↔ 實際打的，最多 3 條，附原句；沒有就寫「無」>
 fix：<最該改的，最多 3 條，最嚴重在前，附行號與改法>
 撞：/<這支> ↔ /<那支>：「<那句話>」兩邊都接。建議 <哪支 description 加什麼排除語>。
 ```
@@ -75,8 +97,9 @@ fix：<最該改的，最多 3 條，最嚴重在前，附行號與改法>
 ## 邊界
 
 - 唯讀：只回報，不改 skill、不 commit。要改由使用者說一聲。
-- 過度工程（能砍什麼）走 `/cc-trim`；正確性 bug 走 `/code-review`。
+- 過度工程（能砍什麼）走 `/cc-trim`；正確性 bug 走 `/code-review`；計畫或規則檔怎樣更好走 `/cc-root`。
 
 ## 防什麼
 
 skill 寫完沒人量：description 接錯話、步驟斷在半路、漏寫前提、夾帶個資，都要等用的時候才撞到；本支在用之前先量一次。
+也防：照設計者想的用法寫，對不上使用者實際打的字，卻沒有任何一步拿紀錄來對。

@@ -1,5 +1,5 @@
 ---
-description: 列出可以整條拿掉、又不損功能的東西——計畫、skill／prompt、規則檔、工具或 API 清單、既有程式碼、整個 repo 的 harness 都能審。只列不改、不 commit。這次改動的程式碼要寫得更簡潔，改用內建 /simplify。EN: trim, what can be cut, over-engineering audit
+description: 列出可以整條拿掉、又不損功能的東西——計畫、規則檔、工具或 API 清單、既有程式碼、一整堆 skill、整個 repo 的 harness 都能列。只列不改、不 commit。一支 skill 寫得好不好用 /cc-skillcheck；計畫或規則檔怎樣更好用 /cc-root；這次改動的程式碼要寫得更簡潔，改用內建 /simplify。EN: trim, what can be cut, over-engineering
 argument-hint: "[要審的目標：檔案路徑、目錄、或「本 repo 的 harness」之類的一句話]"
 allowed-tools: Read, Glob, Grep, Bash(git log:*), Bash(git diff:*), Bash(ls:*), Bash(wc:*), Bash(grep:*), Bash(find:*)
 disallowed-tools: Write, Edit, NotebookEdit
@@ -53,6 +53,7 @@ fail-open 時那句出聲的降級提示、機器可驗的單一事實來源。
 - **範圍只有「整條拿掉」。** 正確性 bug 走 `/code-review`，安全漏洞走 `/security-review`，
   這次改動的程式碼寫得夠不夠簡潔走 `/simplify`（那支會直接動手改，本支不會）。
   既有程式碼只看「有沒有整塊可拿掉」；沒改動的程式碼寫法整潔度，兩支都不管。
+- 一支 skill 寫得好不好（描述、步驟、觸發、實際用法）走 `/cc-skillcheck`；計畫或規則檔怎樣更好走 `/cc-root`。本支只回答「能砍什麼」。
 - 要落地由使用者說一聲，或自己下一步做；一次性報告，不建任何檔、不進 BACKLOG。
 
 ## 防什麼
