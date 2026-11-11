@@ -18,3 +18,4 @@
 | 27 | repo 的 `.claude/settings.json` 有 `language`，與 `templates/README.md:22`「不放個人偏好」矛盾 | 2026-11-11 |
 | 28 | `tools/check-plugin-sync.sh:10` 註解仍提已刪的 `hooks/session-start.sh` | 2026-11-11 |
 | 29 | `check-plugin-sync.sh`：`installed_plugins.json` 解析失敗時印 traceback 後當成沒裝、退 0；該明講或紅 | 2026-11-11 |
+| 30 | `guard-bash.mjs` 仍放行：旗標放變數（`F=-rf; rm $F x`）、`{a,/x}` 大括號、`ssh h <<EOF` 內文、`$SSH` 沒在同條指令設值 | 2026-11-11 |

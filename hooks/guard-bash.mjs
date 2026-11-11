@@ -434,13 +434,16 @@ const VARIABLE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
  * 把字裡的 `$NAME`／`${NAME}` 代成值，回**所有可能的結果**。回 null＝有變數代不出來
  * （沒設過、空字串、被 for／read 改過），或組合太多。`$1`、`${x:-y}`、`$(…)` 不是這裡認得的寫法，
  * 原樣留在結果裡——呼叫端看到結果還有 `$` 就知道沒代完。
+ * asPath＝結果要當成**一個路徑**用：值裡有空白就算代不出來——`rm -rf $S` 沒加引號時 shell 會把它切成
+ * 好幾個路徑，而這裡分不出原本有沒有加引號。
  */
-function expansions(text, vars) {
+function expansions(text, vars, asPath = false) {
   let results = [''];
   let last = 0;
   for (const m of String(text).matchAll(VARIABLE)) {
     const values = vars?.candidates(m[1] ?? m[2]);
     if (!values || values.some((v) => typeof v !== 'string' || v === '')) return null;
+    if (asPath && values.some((v) => /\s/.test(v))) return null;
     const literal = text.slice(last, m.index);
     results = results.flatMap((r) => values.map((v) => r + literal + v));
     if (results.length > 32) return null;
@@ -487,7 +490,8 @@ function unwrap(words, vars) {
       continue;
     }
     if (KEYWORDS.has(rest[0])) { rest = rest.slice(1); continue; }
-    // 指令本身放在變數裡（`SSH="ssh -o X"; $SSH host '…'`、`RM='rm -rf'; $RM docs`）：只有一個可能的值才攤開來判
+    // 指令本身放在變數裡（`SSH="ssh -o X"; $SSH host '…'`、`RM='rm -rf'; $RM docs`）：攤開來判。
+    // 好幾個可能的值由 headVariants 在外面各攤一份；走到這裡還不是單一值的（例如 `sudo $RM`）就不猜。
     if (WHOLE_VARIABLE.test(rest[0])) {
       const values = expansions(rest[0], vars);
       if (values?.length !== 1 || !values[0].trim()) break;
@@ -621,7 +625,7 @@ function disposablePath(text, extra) {
  * 變數有好幾個可能的值時，**每一個**都要過關。vars 不給＝字面上有變數就不放行。
  */
 export function disposableTarget(arg, extra = [], vars = null) {
-  const paths = expansions(arg, vars);
+  const paths = expansions(arg, vars, true);
   return paths !== null && paths.every((path) => disposablePath(path, extra));
 }
 
@@ -770,7 +774,7 @@ function classifyWords(words, inputs, opts, state) {
     const extra = opts.disposable ?? [];
     const blocked = targets.filter((t) => !disposableTarget(t, extra, state.vars));
     if (blocked.length > 0 || targets.length === 0) {
-      const unknown = blocked.some((t) => (expansions(t, state.vars) ?? ['$']).some((path) => /[$`]/.test(path)));
+      const unknown = blocked.some((t) => (expansions(t, state.vars, true) ?? ['$']).some((path) => /[$`]/.test(path)));
       const hit = block('rm', {
         rule: 'rm -rf',
         why: `不可逆遞迴刪除，目標既不在 scratchpad 也不是可重生目錄（${blocked.join(' ') || '未指定路徑'}）。${unknown ? '路徑裡有代不出來的變數，判不出刪的是哪裡。' : ''}`,
@@ -808,6 +812,17 @@ function classifyWords(words, inputs, opts, state) {
 }
 
 /**
+ * 指令本身放在變數裡、而且那個變數有好幾個可能的值（`if …; then SSH=ssh; else SSH="ssh -i k"; fi; $SSH h '…'`）：
+ * 每個可能各攤開成一份來判。不是這種寫法就原樣回一份。
+ */
+function headVariants(words, vars) {
+  if (!words.length || !WHOLE_VARIABLE.test(words[0])) return [words];
+  const values = (expansions(words[0], vars) ?? []).filter((v) => v.trim());
+  if (values.length < 2 || values.length > 8) return [words];
+  return values.map((v) => [...v.trim().split(/\s+/), ...words.slice(1)]);
+}
+
+/**
  * 照順序走過一條指令裡的每個簡單指令：剝掉外包、記變數，再把「從真正的指令開始的字」交給 visit。
  * visit 回非 undefined 的值就停下來把它傳回去。
  */
@@ -817,10 +832,12 @@ function walkCommands(command, visit) {
   const scopeOf = (id) => (scopes[id] ??= new Scope(parents[id] >= 0 ? scopeOf(parents[id]) : null));
   for (const { words: raw, inputs, scope } of commands) {
     const vars = scopeOf(scope);
-    const words = unwrap(raw, vars);
-    const result = visit(words, inputs, vars);
-    if (result !== undefined && result !== null) return result;
-    trackRebinding(words, vars);
+    for (const variant of headVariants(raw, vars)) {
+      const words = unwrap(variant, vars);
+      const result = visit(words, inputs, vars);
+      if (result !== undefined && result !== null) return result;
+      trackRebinding(words, vars);
+    }
   }
   return null;
 }
@@ -838,7 +855,7 @@ export function classifyCommand(command, opts = {}, depth = 0) {
 export function resolveRmTargets(command) {
   const found = [];
   walkCommands(String(command ?? ''), (words, _inputs, vars) => {
-    for (const target of rmTargets(words) ?? []) found.push({ target, paths: expansions(target, vars) });
+    for (const target of rmTargets(words) ?? []) found.push({ target, paths: expansions(target, vars, true) });
   });
   return found;
 }

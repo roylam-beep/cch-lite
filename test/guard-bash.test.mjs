@@ -637,6 +637,32 @@ test("指令本身放在變數裡：只有一個可能的值就攤開來判", ()
   }
 });
 
+test("變數的值帶空白＝沒加引號時會被切成好幾個路徑，不放行", () => {
+  for (const cmd of [
+    `S="${SCRATCH}/a /Users/me"; rm -rf $S`,
+    `S="${SCRATCH}/a /Users/me"; rm -rf $S/x`,
+    `S='node_modules src'; rm -rf $S`,
+    `A=${SCRATCH}; S="$A/x /etc"; rm -rf $S`,
+  ]) {
+    assert.equal(classifyCommand(cmd)?.key, "rm", `未擋：${cmd}`);
+  }
+  // 路徑字面上有空白（加了引號）照舊放行
+  assert.equal(classifyCommand(`rm -rf "${SCRATCH}/with space"`), null);
+  assert.equal(classifyCommand(`S=${SCRATCH}; rm -rf "$S/with space"`), null);
+});
+
+test("指令放在變數裡而且有好幾個可能的值：每個可能都判", () => {
+  for (const [cmd, key] of [
+    ["if [ -z \"$K\" ]; then SSH=ssh; else SSH=\"ssh -i k\"; fi; $SSH h 'rm -rf x'", "rm"],
+    ["RM='rm -f'; [ -n \"$FORCE\" ] && RM='rm -rf'; $RM docs", "rm"],
+    ["G=git; [ -x /opt/git ] && G=/opt/git; $G push --force", "force-push"],
+  ]) {
+    assert.equal(classifyToolInput({ command: cmd })?.key, key, `未擋：${cmd}`);
+  }
+  assert.equal(classifyToolInput({ command: "if [ -z \"$K\" ]; then SSH=ssh; else SSH=\"ssh -i k\"; fi; $SSH h 'ls -la'" }), null);
+  assert.equal(classifyToolInput({ command: "L=ls; [ -n \"$A\" ] && L='ls -la'; $L docs" }), null);
+});
+
 test("環境變數不拿來代：hook 進程的環境不等於指令跑的時候的環境", () => {
   // 代錯的方向是「該問的沒問」，所以就算環境裡的值指向暫存區也不代。
   const env = configFromEnv({ HOME: SCRATCH, TMPDIR: SCRATCH, PWD: SCRATCH, S: SCRATCH });
