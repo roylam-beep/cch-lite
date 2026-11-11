@@ -10,6 +10,10 @@
 
 | # | 一行 | 日期 |
 |---|---|---|
-| 17 | 專案層舊版蓋過帳號層（meta-ads 專案層 cch-lite 0.6.1 壓過 0.6.2）；`check-plugin-sync.sh` 只比帳號層→假綠 | 2026-11-01 |
 | 22 | `README.md`「改 command 本文直接生效」不全對：同 session 已叫過的 skill 再叫仍回舊本文（cc-show 實測），原因未查 | 2026-11-11 |
 | 23 | `ssh h '…; rm -rf …'` 遠端刪除不跳框（`guard-bash.mjs` 檔頭寫明不涵蓋）；舊版切字碰巧會問，要不要正式納入待定 | 2026-11-11 |
+| 24 | `tools/install-hooks.sh:12` 直接蓋掉 repo 原有的 pre-commit，只印一行；該先備份或拒絕覆寫 | 2026-11-11 |
+| 25 | 文件過時：`plugin.json:4`／`marketplace.json:11` 仍寫「感測 hook」；`README.md:20`「七類」實為六類 | 2026-11-11 |
+| 26 | `cc-setup.md:35` 的 `cp … scripts/` 在沒有 `scripts/` 的 repo 會失敗；該先 `mkdir -p scripts` | 2026-11-11 |
+| 27 | repo 的 `.claude/settings.json` 有 `language`，與 `templates/README.md:22`「不放個人偏好」矛盾 | 2026-11-11 |
+| 28 | `tools/check-plugin-sync.sh:10` 註解仍提已刪的 `hooks/session-start.sh` | 2026-11-11 |

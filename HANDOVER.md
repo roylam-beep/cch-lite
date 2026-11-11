@@ -16,6 +16,8 @@
 
 ## ③ 下一輪 kickoff
 
+〔2026-11-11：下面這份 kickoff 指派的 BACKLOG #17 已做完（0.7.8），本節作廢，下一輪另寫。〕
+
 ```
 【開工：修 BACKLOG #17——plugin sync 檢查要比對每一層安裝】一句話背景：cch-lite 是 Claude Code plugin（cc-* skill＋guard-bash hook）；上輪收在 0.7.1，hook 精簡、cc-trim 改名已上 main。
 開場先跑：git rev-parse --short HEAD / git log --oneline origin/HEAD -1 / git status --short
