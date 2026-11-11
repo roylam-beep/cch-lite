@@ -24,6 +24,19 @@
   - guard-bash：原本 exit 2 擋下、要使用者自己下指令；改成 stdout 印 `permissionDecision: "ask"`、exit 0，使用者在確認框按允許＝當輪授權。
     理由：擋下後使用者得自己複製指令去跑，確認框一按就好，授權仍在使用者手上。`CC_GUARD_BASH_ALLOW` 的鍵改成「這類不跳確認框」。
   **翻案條件**：使用者在確認框誤按允許造成無法還原的損失一次 → 重議 `force-push` 這類改回硬擋。
+- **2026-11-11**｜**`guard-bash.mjs` 改成照 shell 的讀法拆指令再判，不再用空白切字**，使用者指派（2026-11-10 檢查查到的漏攔與誤攔）。0.7.7。
+  - 判的是**排在指令位置的字**：引號裡是資料；`FOO=1`／`sudo -u`／`env`／`xargs -n`／`nice -n`／`timeout` 先剝掉；`/bin/rm` 只看檔名；
+    `( )`、`{ }`、`&`、`$(…)`、反引號各自成段；`bash -c`／`eval`／`bash <<EOF` 的內文再拆一層；反斜線換行接成同一行；
+    `<<<` 與算式裡的 `<<` 不當 heredoc（舊版會把後面幾行當內文吃掉）。
+  - force push 多認 refspec 前面的 `+`（`+main`）與 `--mirror`；commit 的 `-n` 併寫（`-nm`）也算；會擋的長旗標連 git 接受的唯一縮寫一起認。
+  - 暫存區改比「解掉 `..` 之後的開頭」或「有一層**剛好**叫 `scratchpad`」，不比子字串。
+    export `SCRATCHPAD_HINTS` 換成 `SCRATCHPAD_PREFIXES`＋`SCRATCHPAD_DIRNAME`。
+  - `rm` 路徑裡的變數：同一條指令先寫死的、hook 進程環境有的，代入再判；代不出來（迴圈變數、`$(…)`、空字串）一律問。
+  - 驗證：本機 transcript 裡 76,050 條真實 Bash 指令新舊兩版比對——75,837 條判定不變；少問 211 條（逐條看過，
+    多數是 `S=<暫存區>; rm -rf "$S/x"`，即 ICEBERG #8）；多問 2 條（`rm -rf "$d"`，`$d` 是迴圈裡組出來的路徑）。
+  - 連帶：`ssh h '…; rm -rf …'` 舊版因切字碰巧會問（比對裡 6 條），現在照檔頭「不涵蓋遠端 `rm`」不問，BACKLOG #23。
+  - 仍拆不到：script 檔內容、別名與函式、`echo … | sh`、`find -exec`／`-delete`、`python -c`（檔頭有列）。
+  **翻案條件**：拆指令那段再被抓到 3 處以上「該攔沒攔」→ 改用現成的 shell parser 套件，不再自己維護。
 
 
 - **2026-09-24**｜**拆掉 skill 使用量層**，使用者定案。拆：`tools/skill-usage.py`、`hooks/log-harness-event.mjs`

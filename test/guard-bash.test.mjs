@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { classifyCommand, classifyToolInput, stripHeredocs, SCRATCHPAD_HINTS } from "../hooks/guard-bash.mjs";
+import { classifyCommand, classifyToolInput, stripHeredocs, SCRATCHPAD_PREFIXES } from "../hooks/guard-bash.mjs";
 
 const SCRATCH = "/private/tmp/claude-501/proj/session/scratchpad";
 
@@ -156,7 +156,7 @@ test("scratchpad 內的遞迴刪除放行，混了非 scratchpad 路徑就擋", 
     "一個目標在 scratchpad 不代表整條指令安全",
   );
   assert.ok(classifyCommand("rm -rf"), "沒指定路徑也擋（可能是變數展開成空字串）");
-  for (const hint of SCRATCHPAD_HINTS) {
+  for (const hint of SCRATCHPAD_PREFIXES) {
     assert.equal(classifyCommand(`rm -rf ${hint}x/tmp`), null, `${hint} 應放行`);
   }
 });
@@ -363,4 +363,250 @@ test("端對端：命中一律 stdout 印 permissionDecision ask、exit 0；放�
   assert.ok(reason.startsWith("git push --force"), reason);
   assert.ok(reason.includes('"CC_GUARD_BASH_ALLOW": "force-push"'), reason);
   assert.equal(run("ls").stdout.toString(), "", "放行時 stdout 不能有東西");
+});
+
+// ───────── 2026-11-11：照 shell 的讀法拆指令（之前用空白切字，下面每一條都漏或誤攔） ─────────
+
+import { parseShell, disposableTarget } from "../hooks/guard-bash.mjs";
+
+const HOME_ENV = configFromEnv({ HOME: "/Users/me" });
+
+test("外包指令帶自己的選項、路徑寫法、設變數開頭：rm 還是排在指令位置", () => {
+  for (const cmd of [
+    "/bin/rm -rf ~/Documents/x",
+    "\\rm -rf docs",
+    "FOO=1 rm -rf docs",
+    "FOO=1 BAR='a b' rm -rf docs",
+    "env FOO=1 rm -rf docs",
+    "env -i FOO=1 rm -rf docs",
+    "sudo -u root rm -rf /etc",
+    "sudo --user root /bin/rm -rf /etc",
+    "ls | xargs -n 1 rm -rf",
+    "ls | xargs -I {} rm -rf {}",
+    "nice -n 10 rm -rf docs",
+    "timeout 5 rm -rf docs",
+    "nohup rm -rf docs",
+    "command rm -rf docs",
+    "sudo env FOO=1 nice -n 5 rm -rf docs",
+    "rm -rf -- -weird docs",
+  ]) {
+    assert.equal(classifyCommand(cmd)?.key, "rm", `未擋：${cmd}`);
+  }
+});
+
+test("子 shell、群組、背景、指令替換、shell 關鍵字後面的指令都要判", () => {
+  for (const cmd of [
+    "(rm -rf docs)",
+    "(cd /x && rm -rf docs)",
+    "{ rm -rf docs; }",
+    "echo $(rm -rf docs)",
+    "echo \"$(rm -rf docs)\"",
+    "echo `rm -rf docs`",
+    "true & rm -rf docs",
+    "if true; then rm -rf docs; fi",
+    "for d in a b; do rm -rf \"$d\"; done",
+    "diff <(rm -rf docs) x",
+    "f() { rm -rf docs; }; f",
+    "! rm -rf docs",
+  ]) {
+    assert.equal(classifyCommand(cmd)?.key, "rm", `未擋：${cmd}`);
+  }
+  assert.equal(classifyCommand("(git push --force)")?.key, "force-push");
+  assert.equal(classifyCommand("x=$(git reset --hard)")?.key, "reset");
+});
+
+test("把字串當指令跑的：bash -c、sh -c、eval、餵給 shell 的 heredoc 與 here-string 再拆一層", () => {
+  for (const [cmd, key] of [
+    ["bash -c \"rm -rf ~/Documents/x\"", "rm"],
+    ["sh -c 'git push --force'", "force-push"],
+    ["bash -lc 'cd /x && git reset --hard'", "reset"],
+    ["zsh -c 'rm -rf docs' arg0", "rm"],
+    ["sudo bash -c 'rm -rf /etc'", "rm"],
+    ["bash -c \"bash -c 'git commit --amend'\"", "amend"],
+    ["eval \"rm -rf docs\"", "rm"],
+    ["eval rm -rf docs", "rm"],
+    ["bash <<EOF\nrm -rf ~/Documents/x\nEOF", "rm"],
+    ["bash <<'EOF'\ngit push --force\nEOF", "force-push"],
+    ["sh -s <<EOF\ngit clean -fd\nEOF", "clean"],
+    ["bash <<< 'rm -rf docs'", "rm"],
+  ]) {
+    assert.equal(classifyCommand(cmd)?.key, key, `未擋：${cmd}`);
+  }
+  // 同樣的字餵給不是 shell 的指令＝資料
+  assert.equal(classifyCommand("cat <<EOF\nrm -rf docs\nEOF"), null);
+  assert.equal(classifyCommand("python3 - <<'EOF'\nprint('git push --force')\nEOF"), null);
+  assert.equal(classifyCommand("bash -c 'ls -la'"), null);
+  assert.equal(classifyCommand("bash script.sh"), null);
+});
+
+test("反斜線換行＝同一行：旗標被換到下一行照樣抓到", () => {
+  for (const [cmd, key] of [
+    ["git push \\\n --force origin main", "force-push"],
+    ["git push origin main \\\n  --force-with-lease", "force-push"],
+    ["rm \\\n -rf ~/Documents/x", "rm"],
+    ["rm -rf \\\n ~/Documents/x", "rm"],
+    ["git reset \\\n --hard", "reset"],
+    ["git commit -m x \\\n  --no-verify", "no-verify"],
+    ["rsync -a ./x \\\n deploy@example.com:/var/www/", "remote-write"],
+  ]) {
+    assert.equal(classifyToolInput({ command: cmd })?.key, key, `未擋：${cmd.replace(/\n/g, "⏎")}`);
+  }
+  assert.equal(classifyCommand("rm -rf \\\n node_modules \\\n dist"), null, "接續行的可重生目錄照樣放行");
+});
+
+test("`<<<` 與算式裡的 `<<` 不是 heredoc：後面幾行不能被吃掉", () => {
+  for (const cmd of [
+    "cat <<< hello\nrm -rf docs",
+    "grep x <<< \"$VAR\"\nrm -rf docs",
+    "echo $((1<<X))\nrm -rf docs\nX",
+    "(( n = 1 << 3 ))\nrm -rf docs\n3",
+    "n=$((1<<EOF))\ngit push --force\nEOF",
+  ]) {
+    assert.ok(classifyCommand(cmd), `未擋：${cmd.replace(/\n/g, "⏎")}`);
+  }
+  // 真的 heredoc 照舊：內文是資料，結尾之後的指令照判
+  assert.equal(classifyCommand("cat <<-EOF\n\trm -rf docs\n\tEOF\necho ok"), null);
+  assert.ok(classifyCommand("cat <<'A' <<'B'\nx\nA\ny\nB\nrm -rf docs"), "兩個 heredoc 之後的指令照判");
+});
+
+test("heredoc 沒加引號時，內文裡的 $(…) 與反引號會執行，要判；加了引號＝純資料", () => {
+  assert.equal(classifyCommand("cat <<EOF\n$(rm -rf docs)\nEOF")?.key, "rm");
+  assert.equal(classifyCommand("cat > f <<EOF\n用 `git push --force` 會…\nEOF")?.key, "force-push");
+  assert.equal(classifyCommand("cat <<'EOF'\n$(rm -rf docs) `git push --force`\nEOF"), null);
+  assert.equal(classifyCommand("cat <<\\EOF\n$(rm -rf docs)\nEOF"), null);
+  // 最常見的 commit 寫法：訊息裡提到被擋的字不算
+  const commit = "git commit -m \"$(cat <<'EOF'\nfix: 不再用 git push --force 與 rm -rf docs\n\n改用 --amend 的說明\nEOF\n)\"";
+  assert.equal(classifyCommand(commit), null);
+  assert.equal(classifyCommand(`${commit} && git push --force`)?.key, "force-push", "heredoc 之後的指令照判");
+});
+
+test("force push 的其他寫法：refspec 前面的 +、--mirror、旗標縮寫", () => {
+  for (const cmd of [
+    "git push origin +main",
+    "git push origin +HEAD:main",
+    "git push origin '+refs/heads/*:refs/heads/*'",
+    "git push --mirror",
+    "git push --mirror backup",
+    "git push --force-with-lease=main:abc origin main",
+    "git push --force-with-l origin main",
+    "git push -uf origin main",
+    "/usr/bin/git push -f",
+    "git -C /repo push origin +main",
+  ]) {
+    assert.equal(classifyCommand(cmd)?.key, "force-push", `未擋：${cmd}`);
+  }
+  for (const cmd of ["git push origin main:main", "git push -u origin feat", "git push origin v1.0+build", "git push --follow-tags"]) {
+    assert.equal(classifyCommand(cmd), null, `誤擋：${cmd}`);
+  }
+});
+
+test("commit 的 -n 併在其他短旗標裡也算；排在帶值旗標後面的字母是值", () => {
+  for (const cmd of ["git commit -nm msg", "git commit -anm msg", "git commit -an -m msg", "git commit --no-veri -m x", "git commit -m x -n"]) {
+    assert.equal(classifyCommand(cmd)?.key, "no-verify", `未擋：${cmd}`);
+  }
+  for (const cmd of [
+    "git commit -mn",                 // 訊息就是 "n"
+    "git commit -m -n",               // 訊息是 "-n"
+    "git commit -am 'done'",
+    "git commit -m 'run with -n'",
+    "git commit --message '--no-verify 是什麼'",
+    "git commit -F notes-n.txt",
+    "git commit -m x -- -n",          // `--` 之後是路徑
+  ]) {
+    assert.equal(classifyCommand(cmd), null, `誤擋：${cmd}`);
+  }
+  assert.equal(classifyCommand("git commit --amen -m x")?.key, "amend", "git 接受 --amend 的唯一縮寫");
+  assert.equal(classifyCommand("git reset --har")?.rule, "git reset --hard");
+});
+
+test("不在指令位置的字是資料：echo、commit 訊息、grep 的樣式、變數值都不命中", () => {
+  for (const cmd of [
+    "echo git push --force",
+    "echo 'rm -rf /'",
+    "echo \"git reset --hard 會丟改動\"",
+    "git commit -m \"fix: remove --amend usage\"",
+    "git commit -m \"docs; rm -rf note\"",
+    "git commit -m 'a && git push --force'",
+    "git commit -m \"revert --no-verify\" --allow-empty",
+    "grep -n 'rm -rf' deploy.sh | head",
+    "grep -rE \"git push --force|git clean -fd\" docs/",
+    "printf '%s\\n' 'git branch -D x' > notes.txt",
+    "MSG='git rebase main'; echo \"$MSG\"",
+    "git log --grep='--amend'",
+    "gh pr create --title 'ban git push --force' --body 'rm -rf is bad'",
+    "ls # rm -rf docs",
+    "rm -rf node_modules 2>/dev/null; npm ci",
+    "rm -rf \"node_modules\" 'dist'",
+  ]) {
+    assert.equal(classifyCommand(cmd), null, `誤擋：${cmd}`);
+  }
+});
+
+test("暫存區比整層名字與開頭，不比子字串；先解掉 .. 再比", () => {
+  for (const cmd of [
+    "rm -rf ~/Documents/scratchpad-notes",
+    "rm -rf /Users/me/my-scratchpad/x",
+    "rm -rf /data/scratchpadx/tmp",
+    "rm -rf /tmp/claude-x/../../Users/me/Documents",
+    "rm -rf /private/tmp/claude-501/../..",
+    `rm -rf ${SCRATCH}/../../../../../../Users/me`,
+    "rm -rf /x/scratchpad/../../etc",
+    "rm -rf /var/tmp/claude-x",
+    "rm -rf /tmp/claudex",
+  ]) {
+    assert.equal(classifyCommand(cmd, HOME_ENV)?.key, "rm", `未擋：${cmd}`);
+  }
+  for (const cmd of [
+    `rm -rf ${SCRATCH}/a/../b`,
+    `rm -rf "${SCRATCH}/with space"`,
+    "rm -rf /tmp/claude-501/x",
+    "rm -rf /work/scratchpad/out",
+    "rm -rf scratchpad/out",
+  ]) {
+    assert.equal(classifyCommand(cmd, HOME_ENV), null, `誤擋：${cmd}`);
+  }
+  assert.equal(disposableTarget("node_modules/../src"), false, "解掉 .. 之後刪的是 src");
+  assert.equal(disposableTarget("./dist/"), true);
+});
+
+test("路徑裡的變數：代得出來就照代入後的路徑判，代不出來一律問", () => {
+  // 同一條指令裡先寫死的變數（實際用法：真實指令比對裡 200 多條都是這個寫法，舊版全部誤攔）
+  for (const cmd of [
+    `S=${SCRATCH}; rm -rf "$S/out"`,
+    `S=${SCRATCH} && rm -rf $S/a $S/b`,
+    `export S=${SCRATCH}\nrm -rf "\${S}/x"`,
+    `SP=${SCRATCH}; W=$SP/work; rm -rf $W`,
+    `D="${SCRATCH}/v1"; rm -rf "$D" && mkdir -p "$D"`,
+  ]) {
+    assert.equal(classifyCommand(cmd, HOME_ENV), null, `誤擋：${cmd}`);
+  }
+  for (const cmd of [
+    "rm -rf $HOME/Documents/build",          // 代入後是絕對路徑，不吃名字清單
+    "rm -rf \"$HOME\"/node_modules",
+    "rm -rf ${HOME}/tmp",
+    "rm -rf $UNKNOWN/build",                 // 代不出來
+    "rm -rf \"$DIR\"/node_modules",
+    "rm -rf \"$(pwd)/dist\"",
+    "D=/Users/me/Documents; rm -rf $D/build",
+    "D=; rm -rf \"$D/\"",                     // 空字串：實際刪的是 /
+    `S=${SCRATCH}; S=/Users/me; rm -rf $S/x`, // 後寫的蓋掉先寫的
+    `S=${SCRATCH} rm -rf $S/x`,               // 這種寫法 S 只給 rm 當環境，$S 代的是舊值
+    "for d in a b; do rm -rf $d/node_modules; done",
+  ]) {
+    assert.equal(classifyCommand(cmd, HOME_ENV)?.key, "rm", `未擋：${cmd}`);
+  }
+  assert.ok(classifyCommand("rm -rf $UNKNOWN/build").why.includes("代不出來"), "確認框要講是變數代不出來");
+  assert.equal(classifyCommand("rm -rf ~/Documents/build", HOME_ENV)?.key, "rm");
+  assert.equal(classifyCommand(`rm -rf ~/scratch`, configFromEnv({ HOME: SCRATCH })), null, "HOME 本身在暫存區時 ~ 代入後放行");
+});
+
+test("拆不動的怪輸入不丟例外、不卡死", () => {
+  for (const cmd of [
+    "echo 'unterminated", "echo \"unterminated $(", "echo `", "cat <<", "cat <<EOF", "((", "$((", ")))", "a | | b",
+    "\\", "<<<", "x=$(", "${", "'".repeat(999), "(".repeat(500), "$(".repeat(200) + "rm -rf docs",
+  ]) {
+    assert.doesNotThrow(() => classifyToolInput({ command: cmd }), cmd.slice(0, 20));
+  }
+  assert.deepEqual(parseShell("a 'b c' \"d $x\" e\\ f").commands[0].words, ["a", "b c", "d $x", "e f"]);
+  assert.deepEqual(parseShell("a 2>&1 >out <in | b &> log").commands.map((c) => c.words), [["a"], ["b"]]);
 });
