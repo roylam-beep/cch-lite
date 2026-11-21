@@ -352,6 +352,16 @@
 
 ## skill 家族成員
 
+- **2026-11-21**｜**新增 `/cc-batch`：一串雜事 → 逐條核對 → 按根因分組 → 檔案不交集切批 → 併發背景子 agent → `/code-review` → 每批一個 commit**，使用者定案。0.7.14。
+  依據：11-21 清 BACKLOG 10 條是臨場拼的（拿 `/cc-root`〈審查〉硬套分組、手寫 3 段 Agent prompt、使用者明說才跑 `/code-review`）。
+  `/cc-root` 追根（3 個提案＋1 個反方）四個候選：①只用平台原生（plan mode＋Agent＋`/code-review`）——死：3.AGENT 有 commit 的 98 份逐字稿只有 1 份跑過 `/code-review`，審查不會自己發生；
+  ②給 `/rr-dispatcher:cc-dispatch` 加本機模式——死：它用「檔案不交集」當分組依據，當天 #22、#33 都被拆到兩批（debe475／968db99、f13dfad／968db99），且模型從沒自己叫過 cc-dispatch；
+  ③記成 memory——死：SetupHK-CRM 的 `dispatch-then-gate` memory 之後 23 次派工只照做 1 次（已刪）；④新 skill——唯一沒被推翻（待驗）。
+  做法：靠使用者手打觸發（cc-gate 手打 15 次、模型自叫 7 次）；審查寫成不能跳的固定步驟；分組先按根因、再用檔案不交集切批，兩者不混為一談。
+  `templates/AGENTS.md` 加一句入口。**未驗**：要重開 session 實際跑一次。
+  **翻案條件**：跑過 `/cc-batch` 的 session 裡，commit 前沒跑 `/code-review` 的達 2 次 → 審查步驟擋不住，重議（逐字稿可查：`grep -l cc-batch … | xargs grep -L '"skill":"code-review"'`）；
+  或上線後 30 天內使用者仍手寫併發 prompt、沒叫 `/cc-batch` 達 3 次 → 入口失效，重議或刪。
+
 - **2026-11-21**｜**`/cc-gate` 清單外可看一處（分開列、不算缺陷）；`/cc-skillcheck` 拿掉 `disable-model-invocation`**，BACKLOG #31、#32。0.7.13。
   依據：①有紀錄的缺陷都在清單外抓到——0.7.9 那幾條是第一輪之外自己再試出來的，0.7.10 兩條是第二輪在清單外抓到的（commit 46decec「補第二輪驗收在清單外抓到的兩個洞」，見 11-11 `guard-bash` 條）；
   舊寫法「不去找清單外的路」會讓驗收漏掉這類。②`/cc-skillcheck` 11-11 後 0 次呼叫，使用者說「審這支 skill」都被模型改派臨時子 agent；

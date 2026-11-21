@@ -20,6 +20,7 @@
 程序本文以 `/cc-close` 為準，本節不另寫程序。
 
 規劃用 Claude Code 的 plan mode。要驗收就說「驗收」「開子 agent audit 你這建議」或打 `/cch-lite:cc-gate`：它派背景子 agent 照你要求的事驗（剛提的建議也能審），不會自動跑。
+一串雜事要一口氣做（按根因分組、分批併發、審過再分批 commit）打 `/cch-lite:cc-batch`。
 
 ## BACKLOG queue 規則
 
