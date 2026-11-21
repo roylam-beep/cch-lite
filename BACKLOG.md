@@ -19,3 +19,6 @@
 | 28 | `tools/check-plugin-sync.sh:10` 註解仍提已刪的 `hooks/session-start.sh` | 2026-11-11 |
 | 29 | `check-plugin-sync.sh`：`installed_plugins.json` 解析失敗時印 traceback 後當成沒裝、退 0；該明講或紅 | 2026-11-11 |
 | 30 | `guard-bash.mjs` 仍放行：旗標放變數（`F=-rf; rm $F x`）、`{a,/x}` 大括號、`ssh h <<EOF` 內文、`$SSH` 沒在同條指令設值 | 2026-11-11 |
+| 31 | `cc-gate.md`〈驗什麼〉3「不去找清單外的路」改成清單外可看一處、分開列；有紀錄的缺陷都是清單外抓到（46decec） | 2026-11-21 |
+| 32 | `cc-skillcheck.md` 拿掉 `disable-model-invocation`（11-11 後 0 次呼叫）；`cc-close.md`〈防什麼〉刪「自己驗收」殘句 | 2026-11-21 |
+| 33 | 文件與實作不符：`README.md`「不量使用次數」、decisions 11-11 cc-gate 翻案條件驗不了、`HANDOVER.md` 已作廢未重寫 | 2026-11-21 |
