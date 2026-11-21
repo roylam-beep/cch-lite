@@ -54,11 +54,22 @@ sh tools/install-hooks.sh                           # 裝 git hook
 |---|---|
 | `commands/`、`templates/` 的本文 | 通常下一次呼叫就生效；同 session 已叫過的 skill 再叫仍可能是舊本文（2026-11-21 改完 cc-gate 後同 session 第一次叫也是舊的，原因未查）。要保證就重開 session |
 | `commands/` **新增或刪除檔** | 同 hook：要 bump（清單從快取列，實測 2026-09-23） |
-| `hooks/`、`tools/` | bump `version` → **每一層安裝**各跑一次 `claude plugin update`（帳號層 `--scope user`；專案層在該專案目錄裡 `--scope project`）→ **重開 session** |
+| `hooks/`、`tools/` | 見下方兩層：帳號層重開 session 或 `/reload-plugins`；專案層要先 push → `claude plugin update --scope project` → 重開 session |
 
-原因：command 走原始 repo，hook 走 `~/.claude/plugins/cache/…/<version>/` 的複本，
-而版本在 session 開始時釘住。`sh tools/check-plugin-sync.sh` 守這件事：安裝紀錄裡每一筆都比，哪一層還是舊的就紅，並印出該跑的那一行。
-在本 repo 目錄裡不帶 `--scope` 只會更新專案層那份（`.claude/settings.json` 有啟用），帳號層仍是舊版（實測 2026-11-06）。
+兩層來源不同（2026-11-21 實測 `claude plugin update`）：
+
+| 層 | marketplace 來源 | 怎麼生效 |
+|---|---|---|
+| 帳號層 | `known_marketplaces.json` 記 `directory`＝本機資料夾 | 改完存檔即可；重開 session 或打 `/reload-plugins`。`claude plugin update … --scope user` 第一次印「updated from 0.7.11 to 0.7.14」，第二次印「read from its folder … nothing to update. Edits there take effect at the next session start or /reload-plugins」 |
+| 專案層 | 該專案 `.claude/settings.json` 的 `extraKnownMarketplaces` 指向 GitHub `roylam-beep/cch-lite` | **先 push**，再在該專案目錄跑 `claude plugin update cch-lite@cch-lite --scope project`（印「updated from 0.7.11 to 0.7.14 … Restart to apply changes」），再重開 session。沒 push，這層拿到的還是舊的 |
+
+原因：帳號層的 marketplace 是資料夾，plugin 直接讀它；專案層的 marketplace 是 GitHub，只會抓下來的副本，不看本機資料夾。
+更早的實測（2026-09～11）曾記成「hook 走 `~/.claude/plugins/cache/…/<version>/` 複本、版本在 session 開始時釘住」，
+那是專案層（或當時帳號層）的行為；**帳號層現在是否仍讀快取，與下面的紀錄互相矛盾，[需確認]**：
+`installed_plugins.json` 的帳號層 `installPath` 指向 `cache/cch-lite/cch-lite/0.7.14`，
+但 `plugin update` 說它讀資料夾。`sh tools/check-plugin-sync.sh` 仍照 `installPath` 逐筆比對，哪一層的複本跟 repo 不一致就紅，並印出該跑的那一行。
+在本 repo 目錄裡不帶 `--scope` 只會更新專案層那份（`.claude/settings.json` 有啟用），帳號層不會動（實測 2026-11-06）。
+專案層的 GitHub 副本實際放在哪、`installPath` 是否就是它：[需確認]（`~/.claude/plugins/marketplaces/` 底下沒有 cch-lite）。
 
 ## 規矩（本 repo 自己的，四條）
 

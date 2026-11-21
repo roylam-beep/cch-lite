@@ -16,8 +16,14 @@
 #     新增 `cc-cursor.md` 沒 bump，快取 0.3.2 沒有這檔，session 的 skill 清單也不出現）。
 #     所以 `commands/` 只比檔名，不比內容。
 #
-# 改了 hooks/ 或 tools/ 之後：bump `plugin.json` 的 version → `claude plugin update cch-lite`
-# → **重開 session**（版本在 session 開始時釘住，同一個 session 內不會換）。
+# 改了 hooks/ 或 tools/ 之後（2026-11-21 實測 `claude plugin update`，見 README「改了 command 通常就生效」）：
+#   · 帳號層（marketplace 來源是 directory＝本機資料夾）：存檔後重開 session 或打 /reload-plugins；
+#     `claude plugin update cch-lite@cch-lite --scope user` 第二次跑會印 nothing to update、讀資料夾。
+#   · 專案層（`.claude/settings.json` 的 extraKnownMarketplaces 指向 GitHub）：先 push →
+#     在該專案跑 `claude plugin update cch-lite@cch-lite --scope project` → 重開 session。
+#   · [需確認] 帳號層 installPath 仍指向 cache/…/<version>，與「帳號層讀資料夾」互相矛盾；
+#     下面比對的是 installPath 那份複本，帳號層那筆是否還有意義待查（BACKLOG #34）。
+#     bump plugin.json 的 version 對專案層是否仍必要，也未驗。
 #
 # **每一筆安裝都比**：同一個 plugin 可以同時裝在帳號層與好幾個專案層（各自釘各自的版本），
 # 專案層那份會蓋過帳號層。只比第一筆的話，帳號層是新的、某個專案還跑舊的，這支照樣說 OK。
