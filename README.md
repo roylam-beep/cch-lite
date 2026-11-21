@@ -17,7 +17,7 @@ commands/cc-*.md                skill 家族（**唯一一份**，帳號層已�
 hooks/hooks.json                plugin 掛哪些 hook 以這檔為準
 hooks/guard-bash.mjs            PreToolUse(Bash) 不可逆指令與遠端寫入跳確認框，使用者按允許才跑（fail open）
 templates/                      /cch-lite:cc-setup 安裝進 repo 的骨架（複製，不 symlink）
-tools/check_docs.py             文件水位與死指標七類判定（pre-commit 掛這支）
+tools/check_docs.py             文件水位與死指標六類判定（pre-commit 掛這支）
 tools/install-hooks.sh          把 templates/hooks/ 裝進當前 repo 的 .git/hooks/
 tools/check-plugin-loads.sh     plugin 真的載入了嗎（validate 驗不出載入期錯誤）
 tools/check-plugin-sync.sh      跑著的 hook 是不是當前版本
@@ -46,13 +46,13 @@ python3 tools/check_docs.py .                       # 快閘（已裝成 pre-com
 sh tools/install-hooks.sh                           # 裝 git hook
 ```
 
-## 改了 command 就生效；改了 hook 要 bump
+## 改了 command 通常就生效；改了 hook 要 bump
 
 同一個 plugin 兩種行為（實測，見 `docs/decisions.md`）：
 
 | 改了什麼 | 怎麼生效 |
 |---|---|
-| `commands/`、`templates/` 的本文 | 直接生效，下一次呼叫就是新的 |
+| `commands/`、`templates/` 的本文 | 通常下一次呼叫就生效；同 session 已叫過的 skill 再叫仍可能是舊本文（2026-11-21 改完 cc-gate 後同 session 第一次叫也是舊的，原因未查）。要保證就重開 session |
 | `commands/` **新增或刪除檔** | 同 hook：要 bump（清單從快取列，實測 2026-09-23） |
 | `hooks/`、`tools/` | bump `version` → **每一層安裝**各跑一次 `claude plugin update`（帳號層 `--scope user`；專案層在該專案目錄裡 `--scope project`）→ **重開 session** |
 
@@ -66,7 +66,7 @@ sh tools/install-hooks.sh                           # 裝 git hook
    所以本 repo **可以有 remote**——這是它跟 `~/.claude` 最大的差別。
 2. 每支 skill、每道 gate、每條規則進來時寫一節 `## 防什麼`：一句話講它防的失敗。
    說不出來就不進。
-   **不量使用次數**——叫了幾次不等於有沒有用（`docs/decisions.md`）。
+   次數只當線索：看的是抓到什麼、使用者下一句，不單看叫了幾次——叫了幾次不等於有沒有用（`docs/decisions.md`）。
 3. **欄位語意一律實測，不照文件或名稱推。** frontmatter 欄位、設定鍵、hook 事件，
    要先有一次可重現的實測（headless 跑一遍，或從 binary 讀出程式路徑）才准寫進規則。
    反例：`allowed-tools` 名字像白名單、官方 schema 也寫「Tools available to the model」，
