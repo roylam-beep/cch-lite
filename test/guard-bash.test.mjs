@@ -623,6 +623,63 @@ test("ssh 那頭的指令照同一套規則再判一次", () => {
   }
 });
 
+test("ssh 的 heredoc 內文也是那頭要跑的指令（加不加引號都一樣）", () => {
+  for (const cmd of [
+    "ssh h <<EOF\nrm -rf /srv/data\nEOF",
+    "ssh h <<'EOF'\nrm -rf /srv/data\nEOF",          // 引號只管本機要不要展開，那頭照跑
+    "ssh -p 2222 h bash <<EOF\nrm -rf /srv/x\nEOF",
+  ]) {
+    assert.equal(classifyToolInput({ command: cmd })?.key, "rm", `未擋：${cmd}`);
+  }
+  assert.equal(classifyToolInput({ command: "ssh h <<EOF\nls /srv\nEOF" }), null, "內文沒事就放行");
+  assert.equal(classifyToolInput({ command: "ssh h 'cat > /srv/notes.txt' <<EOF\nrm -rf old\nEOF" }), null,
+    "遠端指令不是 shell 時，heredoc 是餵給它的資料");
+});
+
+test("ssh 那頭的 rm -rf：快取／暫存目錄底下的放行，其餘照問", () => {
+  for (const cmd of [
+    "ssh h 'rm -rf ~/.cache/foo'",
+    "ssh h 'rm -rf /tmp/deploy-123 ~/app/node_modules/x'",
+    "ssh h 'rm -rf ~/site/.tmp-old/a'",
+    "ssh h 'cd /srv/app && rm -rf node_modules && npm ci'",       // 相對路徑跟本機一樣
+    "ssh h 'T=/tmp/x; rm -rf $T/y'",                                // 同一段遠端指令裡寫死的照代
+  ]) {
+    assert.equal(classifyToolInput({ command: cmd }), null, `誤擋：${cmd}`);
+  }
+  for (const cmd of [
+    "ssh h 'rm -rf ~/.cache/foo /srv/data'",   // 有一個目標不合格
+    "ssh h 'rm -rf ~/.cache/../data'",          // 解掉 .. 後是 ~/data
+    "ssh h 'rm -rf /srv/build'",                // build 在伺服器上常是上線目錄
+    "ssh h 'rm -rf build'",
+    "ssh h 'rm -rf $T/.cache/x'",               // 那頭環境的變數看不到
+    "ssh h 'rm -rf ~/.cache'",                  // 快取目錄本身
+    "ssh h 'rm -rf /tmp'",
+    "ssh h 'rm -rf /tmp/.'",
+    "ssh h 'rm -rf ~root/.cache/x'",            // 不猜是誰的家目錄
+    "ssh h 'bash -c \"rm -rf /srv/z\"'",          // 遠端裡再包一層也照遠端規則
+  ]) {
+    assert.equal(classifyToolInput({ command: cmd })?.key, "rm", `未擋：${cmd}`);
+  }
+  assert.equal(classifyCommand("rm -rf build"), null, "本機規則不受影響");
+});
+
+test("rm 的旗標放在變數裡：代得出來就當旗標判", () => {
+  for (const cmd of [
+    "F=-rf; rm $F /x",
+    "F=\"-r -f\"; rm $F /x",
+    "if x; then F=-r; else F=-rf; fi; rm $F /x",   // 有一個可能是 -rf 就算
+  ]) {
+    assert.equal(classifyCommand(cmd)?.rule, "rm -rf", `未擋：${cmd}`);
+  }
+  for (const cmd of [
+    "F=-v; rm $F /x",
+    "F=-rf; rm $F node_modules",
+    "F=/x; rm -f $F",
+  ]) {
+    assert.equal(classifyCommand(cmd), null, `誤擋：${cmd}`);
+  }
+});
+
 test("指令本身放在變數裡：只有一個可能的值就攤開來判", () => {
   for (const [cmd, key] of [
     ["RM='rm -rf'; $RM docs", "rm"],

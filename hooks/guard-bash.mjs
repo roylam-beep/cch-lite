@@ -22,6 +22,7 @@
 //     再看是不是以 SCRATCHPAD_PREFIXES 開頭，或有一層**剛好**叫 `scratchpad`；
 //     (b) repo 內可重生目錄（DISPOSABLE_NAMES 與 `.tmp-*` 層名）。絕對路徑與帶 `..` 的相對路徑不吃 (b)。
 //     路徑裡的變數：**只代同一條指令裡寫死的**（`D=/tmp/claude-1/x; rm -rf "$D"`），不讀環境變數。
+//     旗標放在變數裡（`F=-rf; rm $F x`）也照代：代得出來、值都是 `-` 開頭的就當旗標判，好幾個可能的值取聯集。
 //     同一個名字設過好幾次就每個值都要過關；被 `for`／`read`／`unset`／`source`／`eval` 動過、沒設過、
 //     空字串、`$(…)`、`$HOME`、`~` 一律問——不知道刪的是哪裡。子 shell 裡設的值出不來。
 //   · `git commit --no-verify`／`-n`（含併寫 `-nm`）、`git push --no-verify` — 拆掉 pre-commit／pre-push 那道防線。
@@ -32,7 +33,10 @@
 //     `wp db import|reset|drop` 或 `wp search-replace`。要的是使用者看一眼目的地。
 //     **放行** `rsync -n`、拉回本機、`wp … db export` 這類讀取。
 //     **不涵蓋** `scp`、遠端 `mysql`、`ssh h < script.sh`、`ssh h bash -s`、`sftp`、`git push`。
-//     遠端的 `rm -rf` 不算這一類，但 `ssh 主機 '…'` 的內文會照上面各類再判一次，所以照 `rm` 那類問；`rm -f` 放行。
+//     遠端的 `rm -rf` 不算這一類，但 `ssh 主機 '…'` 與 `ssh 主機 [bash] <<EOF` 的內文會照上面各類再判一次；`rm -f` 放行。
+//     那頭的 `rm -rf` 換一套放行條件（remoteDisposablePath）：沒有 scratchpad、不吃本 repo 的可重生名單，
+//     只放快取／暫存目錄**底下**的東西——`~/.cache/foo`、`/tmp/x`、`~/app/node_modules/y` 放；
+//     `~/.cache`、`/tmp` 本身、`/srv/build`、帶 `$` 或 `..` 的照問。
 //   · git 的長旗標接受唯一縮寫（`--amen`＝`--amend`），會擋的那幾個旗標連縮寫一起認。
 //
 // **拆不到的地方（照樣放行）**：script 檔的內容（`bash x.sh`）、別名與 shell 函式、管線餵給 shell 的字串
@@ -80,6 +84,15 @@ export const DISPOSABLE_NAMES = new Set([
 
 /** `.tmp-size`／`tmp`／`temp-out` 這種一看就是暫存的層名，比照可重生目錄放行。 */
 const TMP_SEGMENT = /^\.?(tmp|temp)([-_.].*)?$/i;
+
+/**
+ * `ssh` 那頭的 `rm -rf` 可放行的層名：DISPOSABLE_NAMES 的子集。拿掉 build／dist／out／target／venv／coverage／.venv／.gradle——
+ * 伺服器上這些常是正在上線的目錄，不是長得回來的產物。
+ */
+export const REMOTE_DISPOSABLE_NAMES = new Set([
+  'node_modules', '.cache', '__pycache__', '.pytest_cache', '.next', '.nuxt', '.turbo',
+  '.parcel-cache', '.svelte-kit', '.mypy_cache', '.ruff_cache', '.tox',
+]);
 
 // ───────────────────────── 把指令照 shell 的讀法拆開 ─────────────────────────
 
@@ -616,6 +629,24 @@ function disposablePath(text, extra) {
 }
 
 /**
+ * `ssh` 那頭一條**已經代完變數**的路徑可不可以放行。那頭沒有 scratchpad，也不是本 repo：
+ * 有一層是 REMOTE_DISPOSABLE_NAMES 或 tmp 類層名才放；絕對路徑與 `~/` 開頭的，那一層底下還要再有東西
+ * （`~/.cache/foo` 放，`~/.cache`、`/tmp` 本身照問）。相對路徑跟本機一樣，相對於那頭的工作目錄。
+ */
+function remoteDisposablePath(text) {
+  if (/[$`]/.test(text)) return false;
+  let rest = text;
+  let anchored = rest.startsWith('/');
+  if (rest === '~' || rest.startsWith('~/')) { rest = rest.slice(1); anchored = true; }
+  else if (rest.startsWith('~')) return false; // `~user/…` 不猜是誰的家目錄
+  const segments = posix.normalize(rest).split('/').filter(Boolean);
+  if (!segments.length || segments.includes('..')) return false;
+  const at = segments.findIndex((seg) => REMOTE_DISPOSABLE_NAMES.has(seg) || TMP_SEGMENT.test(seg));
+  if (at === -1) return false;
+  return !anchored || segments.slice(at + 1).some((seg) => seg !== '.');
+}
+
+/**
  * 這個 rm 目標可不可以放行。暫存區＝可以；repo 內的可重生目錄＝可以；其餘擋。
  * 先代入變數、解掉 `.` 與 `..` 再比——`/tmp/claude-1/../../Users/x` 實際刪的是 `/Users/x`。
  *
@@ -624,15 +655,24 @@ function disposablePath(text, extra) {
  * **代不出來的變數一律不放行**：`$DIR/build` 不知道 `$DIR` 是哪裡，空字串時就是 `/build`。
  * 變數有好幾個可能的值時，**每一個**都要過關。vars 不給＝字面上有變數就不放行。
  */
-export function disposableTarget(arg, extra = [], vars = null) {
+export function disposableTarget(arg, extra = [], vars = null, remote = false) {
   const paths = expansions(arg, vars, true);
-  return paths !== null && paths.every((path) => disposablePath(path, extra));
+  return paths !== null && paths.every((path) => (remote ? remoteDisposablePath(path) : disposablePath(path, extra)));
 }
 
-/** 這個指令是不是 `rm` 帶 r＋f；是就回它要刪的目標（可能是空陣列），不是回 null。 */
-function rmTargets(words) {
+/**
+ * 這個指令是不是 `rm` 帶 r＋f；是就回它要刪的目標（可能是空陣列），不是回 null。
+ * 旗標放在變數裡（`F=-rf; rm $F x`）：代得出來、每個可能的值都是 `-` 開頭的，就攤開當旗標判；
+ * 好幾個可能的值取聯集——只要有一個可能是 `-rf` 就算。代不出來的照舊當路徑。
+ */
+function rmTargets(words, vars = null) {
   if (baseName(words[0]) !== 'rm') return null;
-  const rest = words.slice(1);
+  const rest = words.slice(1).flatMap((w) => {
+    if (!vars || !w.includes('$')) return [w];
+    const values = expansions(w, vars);
+    if (!values || !values.every((v) => v.trimStart().startsWith('-'))) return [w];
+    return [...new Set(values.flatMap((v) => v.trim().split(/\s+/)))];
+  });
   const cut = rest.indexOf('--'); // `--` 之後全是路徑，`-` 開頭的也是
   const flags = cut === -1 ? rest : rest.slice(0, cut);
   if (!recursiveForce(flags)) return null;
@@ -768,14 +808,18 @@ function classifyWords(words, inputs, opts, state) {
     if (hit) return hit;
   }
 
-  // 8. rm -rf（暫存區與可重生目錄放行）
-  const targets = rmTargets(words);
+  // 8. rm -rf（暫存區與可重生目錄放行；ssh 那頭改用 remoteDisposablePath 那套）
+  const targets = rmTargets(words, state.vars);
   if (targets) {
     const extra = opts.disposable ?? [];
-    const blocked = targets.filter((t) => !disposableTarget(t, extra, state.vars));
+    const blocked = targets.filter((t) => !disposableTarget(t, extra, state.vars, opts.remote === true));
     if (blocked.length > 0 || targets.length === 0) {
       const unknown = blocked.some((t) => (expansions(t, state.vars, true) ?? ['$']).some((path) => /[$`]/.test(path)));
-      const hit = block('rm', {
+      const hit = opts.remote === true ? block('rm', {
+        rule: 'rm -rf（ssh 那頭）',
+        why: `遠端不可逆遞迴刪除，目標不是快取或暫存目錄底下的東西（${blocked.join(' ') || '未指定路徑'}）。${unknown ? '路徑裡有代不出來的變數，判不出刪的是哪裡。' : ''}`,
+        hint: `遠端只放行快取／暫存目錄**底下**的東西：路徑裡有一層是 ${[...REMOTE_DISPOSABLE_NAMES].slice(0, 3).join('、')} 這類或 tmp 類層名，而且絕對路徑與 \`~/\` 開頭的那一層底下還要再有東西（\`~/.cache/foo\` 放，\`~/.cache\` 本身照問）。其餘先問使用者。`,
+      }) : block('rm', {
         rule: 'rm -rf',
         why: `不可逆遞迴刪除，目標既不在 scratchpad 也不是可重生目錄（${blocked.join(' ') || '未指定路徑'}）。${unknown ? '路徑裡有代不出來的變數，判不出刪的是哪裡。' : ''}`,
         hint: `暫存檔放 scratchpad（路徑以 ${SCRATCHPAD_PREFIXES.join(' 或 ')} 開頭，或有一層叫 ${SCRATCHPAD_DIRNAME}）或取名 \`.tmp-*\`，本 hook 放行；\`node_modules\`／\`dist\` 這類可重生目錄也放行。版控檔用 \`git rm\`。其餘先問使用者。`,
@@ -795,15 +839,24 @@ function classifyWords(words, inputs, opts, state) {
       for (const input of inputs) scripts.push(input.text);
     }
     if (head === 'eval') scripts.push(rest.join(' '));
+    const remoteScripts = [];
     if (head === 'ssh') {
       // 那頭的指令照同一套規則判：遠端的 `rm -rf`、`git reset --hard` 本機 git 一樣救不回來。
-      // 那頭的變數這裡看不到，所以 `rm -rf $T` 一律問；`rm -f` 清單檔照舊放行。
+      // 那頭環境裡的變數這裡看不到（同一段遠端指令裡寫死的照樣代），所以 `rm -rf $T` 照問；`rm -f` 清單檔照舊放行。
+      // `ssh h <<EOF`（沒給遠端指令，或遠端指令是 shell）的內文是那頭的 shell 要跑的，再拆一層；
+      // `ssh h 'cat > x' <<EOF` 的內文只是餵給那個指令的資料，不判。
       let k = 0;
       while (k < rest.length && rest[k].startsWith('-')) k += SSH_VALUED.has(rest[k]) ? 2 : 1;
-      if (rest.length > k + 1) scripts.push(rest.slice(k + 1).join(' '));
+      const remoteCmd = rest.slice(k + 1);
+      if (remoteCmd.length) remoteScripts.push(remoteCmd.join(' '));
+      if (!remoteCmd.length || SHELLS.has(baseName(remoteCmd[0]))) for (const input of inputs) remoteScripts.push(input.text);
     }
     for (const script of scripts) {
       const hit = classifyCommand(script, opts, state.depth + 1);
+      if (hit) return hit;
+    }
+    for (const script of remoteScripts) {
+      const hit = classifyCommand(script, { ...opts, remote: true }, state.depth + 1);
       if (hit) return hit;
     }
   }
@@ -855,7 +908,7 @@ export function classifyCommand(command, opts = {}, depth = 0) {
 export function resolveRmTargets(command) {
   const found = [];
   walkCommands(String(command ?? ''), (words, _inputs, vars) => {
-    for (const target of rmTargets(words) ?? []) found.push({ target, paths: expansions(target, vars, true) });
+    for (const target of rmTargets(words, vars) ?? []) found.push({ target, paths: expansions(target, vars, true) });
   });
   return found;
 }
