@@ -2,12 +2,14 @@
 # 裝著的 hook 是不是本 repo 的當前內容？
 #
 # **只比 `hooks/` 與 `tools/`，不比 `commands/`／`templates/`。** 理由是實測出來的兩種行為：
-#   · **command 走原始 repo**：改了 `commands/` 的本文，不 bump、不 update，下一次呼叫就生效；
+#   · **command 走原始 repo**：改了 `commands/` 的本文，不 bump、不 update，新呼叫通常就生效；
+#     但**不全對**：同一個 session 已叫過的 skill 再叫仍回舊本文（2026-11-11 cc-show 實測），
+#     11-21 也見過改完後同 session 首次叫仍是舊本文，原因未查（BACKLOG #22）；要確認改動生效，開新 session；
 #     command 本文裡的 `${CLAUDE_PLUGIN_ROOT}` 展開成 `~/Documents/3.AGENT/cch-lite`。
 #     所以 `commands/` 與它讀的 `templates/` 永遠是當前內容，不需要這支守。
 #   · **hook 走安裝快取**：`~/.claude/plugins/cache/<mp>/<plugin>/<version>/`，
 #     版本在 session 開始時釘住（實測：PreToolUse 的錯誤訊息印出 `…/0.1.3/hooks/guard-bash.mjs`，
-#     當時 repo 已經是 0.1.4）。在 `hooks/session-start.sh` 插一行標記、不 bump、開新 session
+#     當時 repo 已經是 0.1.4）。當時在 session-start hook（已刪）插一行標記、不 bump、開新 session
 #     → 標記**沒有**出現，確認 hook 讀的是快取那份。
 #     `hooks/` 呼叫的 `$CLAUDE_PLUGIN_ROOT/tools/*` 同樣落在快取，所以 `tools/` 也要比。
 #   · **command 的「有哪幾支」走快取**：本文讀原始 repo，但清單從快取列（實測 2026-09-23：
@@ -32,8 +34,13 @@ SEP="$(printf '\037')"  # 欄位分隔用控制字元：路徑可以有空白，
 sync_one() {  # $1 plugin 名  $2 原始目錄
   LIST="$(python3 -c '
 import json,sys
-for e in json.load(open(sys.argv[1]))["plugins"].get(sys.argv[2] + "@cch-lite") or []:
-    print("\x1f".join([e.get("scope") or "user", e.get("projectPath") or "", e.get("installPath") or "", e.get("version") or "?"]))' "$REC" "$1")"
+try:
+    REC = json.load(open(sys.argv[1]))["plugins"]
+    ROWS = REC.get(sys.argv[2] + "@cch-lite") or []
+except Exception:
+    sys.exit(3)
+for e in ROWS:
+    print("\x1f".join([e.get("scope") or "user", e.get("projectPath") or "", e.get("installPath") or "", e.get("version") or "?"]))' "$REC" "$1")" || { echo "PLUGIN_SYNC FAIL：讀不懂安裝紀錄 $REC（不是合法 JSON 或缺 plugins 欄位）"; RC=1; return; }
   [ -n "$LIST" ] || { echo "PLUGIN_SYNC 跳過（$1 沒裝在本機）"; return; }
   while IFS="$SEP" read -r SCOPE PROJ CACHE VER; do
     if [ -n "$PROJ" ]; then

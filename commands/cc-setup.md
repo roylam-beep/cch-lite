@@ -32,7 +32,7 @@ repo 外沒有機器守，要自己看。
 
 ```bash
 sh "${CLAUDE_PLUGIN_ROOT}/tools/install-hooks.sh"        # git hook（非 git repo 略過）
-cp "${CLAUDE_PLUGIN_ROOT}/tools/check_docs.py" scripts/  # 沒有 scripts/check_docs.py 才複製
+[ -e scripts/check_docs.py ] || { mkdir -p scripts && cp "${CLAUDE_PLUGIN_ROOT}/tools/check_docs.py" scripts/check_docs.py; }  # 沒有 scripts/check_docs.py 才複製
 ```
 
 複製之後以下各項**不准靜默**（收尾第 2 項逐條明列）：

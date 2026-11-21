@@ -1,11 +1,13 @@
 #!/bin/sh
-# tools/check-plugin-sync.sh 的測試：造一個假的家目錄（假安裝紀錄＋假的安裝複本）真的跑，不讀檔猜行為。六項：
+# tools/check-plugin-sync.sh 的測試：造一個假的家目錄（假安裝紀錄＋假的安裝複本）真的跑，不讀檔猜行為。八項：
 #   1. 帳號層＋專案層都和 repo 一致 → 退 0，兩筆都印 OK
 #   2. 帳號層一致、某專案層是舊版 → 退 1，印出那個專案路徑與 `--scope project`（BACKLOG #17 的假綠）
 #   3. 只有帳號層是舊版 → 退 1，印 `--scope user`
 #   4. 專案資料夾已不存在的那筆 → 只印提示，退 0
 #   5. 專案路徑有空白 → 照樣分得出欄位
 #   6. 沒有安裝紀錄／這個 plugin 沒裝 → 跳過，退 0
+#   7. 安裝紀錄不是合法 JSON → 明講「讀不懂安裝紀錄」並退 1，不印 traceback（BACKLOG #29）
+#   8. 安裝紀錄是 JSON 但 plugins 不是物件 → 同上
 # 用 HOME 指到暫存目錄：那支讀的是 `$HOME/.claude/plugins/installed_plugins.json`，不必為了測試加開關。
 set -e
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -72,4 +74,14 @@ run
 [ "$A" = "0|PLUGIN_SYNC 跳過（本機沒有安裝記錄）" ] && [ "$RC" = 0 ] && echo "$OUT" | grep -q "跳過（cch-lite 沒裝在本機）" \
   && ok "沒有紀錄／沒裝 → 跳過，不紅" || bad "沒有紀錄：$A / rc=$RC $OUT"
 
-[ "$FAIL" = 0 ] && echo "PLUGIN_SYNC_TEST OK（6 項）" || { echo "PLUGIN_SYNC_TEST FAIL"; exit 1; }
+echo '{壞掉的 json' > "$TMP/home/.claude/plugins/installed_plugins.json"
+run
+[ "$RC" = 1 ] && echo "$OUT" | grep -q "讀不懂安裝紀錄" && ! echo "$OUT" | grep -q Traceback \
+  && ok "安裝紀錄壞掉 → 紅，明講讀不懂，無 traceback" || bad "安裝紀錄壞掉：rc=$RC $OUT"
+
+echo '{"plugins": []}' > "$TMP/home/.claude/plugins/installed_plugins.json"
+run
+[ "$RC" = 1 ] && echo "$OUT" | grep -q "讀不懂安裝紀錄" && ! echo "$OUT" | grep -q Traceback \
+  && ok "plugins 不是物件 → 紅，明講讀不懂，無 traceback" || bad "plugins 不是物件：rc=$RC $OUT"
+
+[ "$FAIL" = 0 ] && echo "PLUGIN_SYNC_TEST OK（8 項）" || { echo "PLUGIN_SYNC_TEST FAIL"; exit 1; }

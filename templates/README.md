@@ -14,7 +14,7 @@
 | `docs/archive/ICEBERG.md` | `<repo>/docs/archive/ICEBERG.md` | 不動 |
 | `.claude/rules/implementation.md` | 同路徑 | 不動 |
 | `.claude/settings.json` | 同路徑 | 不動（見 W4.4） |
-| `hooks/pre-commit` | `<repo>/.git/hooks/pre-commit` | 不動 |
+| `hooks/pre-commit` | `<repo>/.git/hooks/pre-commit` | 內容相同不動；不同則備份成 `.bak` 後覆寫 |
 | `../tools/check_docs.py` | `<repo>/scripts/check_docs.py` | 不動 |
 | `.github/workflows/harness.yml` | 同路徑 | 不動（ruleset 見 W4.5） |
 
