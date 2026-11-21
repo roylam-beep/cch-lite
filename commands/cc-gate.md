@@ -1,24 +1,26 @@
 ---
-description: 獨立驗收：照使用者這次要求的事（有 plan mode 計畫檔就照計畫檔）驗做出來的東西。使用者說「驗收」「照我說的驗一下」或打 /cc-gate 才跑；跑的時候派背景子 agent（Sonnet）、不擋使用者，結果回來再修，最多兩輪。只回報，不改檔。只找程式 bug 用 /code-review。EN: acceptance check against what was asked, background reviewer
-argument-hint: "[可選：計畫檔路徑；或聚焦範圍；寫 opus 改用 Opus]"
+description: 獨立覆核這個 session 剛做完的事（照使用者原話＋git diff，有計畫檔就照計畫檔），或剛提的建議／做法（拆成逐條主張查證）。使用者說「驗收」「照我說的驗一下」「開子 agent audit／review 你這建議／你的做法」「gate 你自己」或打 /cc-gate 才跑；派背景子 agent，模型照使用者點名（含 fable），沒點名用 Sonnet，不擋使用者，結果回來再修，最多兩輪。只回報，不改檔。只找程式 bug 用 /code-review；審既有的計畫或規則檔用 /cc-root。EN: independent check of what this session just built or proposed, background reviewer
+argument-hint: "[可選：計畫檔路徑；或聚焦範圍；寫 opus／fable 改用該模型]"
 allowed-tools: Bash, Read, Glob, Grep
 ---
 
-對**這次做出來的東西**跑獨立驗收。$ARGUMENTS
+對**這次做出來的東西，或這個 session 剛提的建議**跑獨立覆核。$ARGUMENTS
 
 價值全來自「跑的人不是寫的人」——寫的人帶著寫錯時的同一組假設，自己驗不出「跑得動但語意錯」。
 
 ## 什麼時候跑
 
 使用者說了才跑：「驗收」「照我說的驗一下」「做完了，對一下有沒有照我要的做」，或直接打 `/cc-gate`。
+「開子 agent audit／review 你這建議」「開 fable 子 agent 審你的做法」「gate 你自己」也算——對象是還沒動手的建議時走〈驗什麼〉的建議分支。
 不自己決定要不要派——以前靠做事的 session 記得自派，實測幾乎沒派過（`docs/decisions.md`）。
 
 ## 怎麼派
 
 被叫到的 session 不自己驗：用 Agent 工具派子 agent 照本檔跑，
-`model: "sonnet"`（使用者說要嚴格或寫 `opus` 才用 `"opus"`）、`run_in_background: true`，派完照常回報、不等它。
+`model` 照使用者點名（`"opus"`、`"fable"` 等；說要嚴格沒點名用 `"opus"`），沒點名用 `"sonnet"`；`run_in_background: true`，派完照常回報、不等它。
 prompt 只給四樣：本檔路徑（先跑 `ls "${CLAUDE_PLUGIN_ROOT}/commands/cc-gate.md"` 拿絕對路徑）、
 **使用者這次要求的原話（逐字貼，不改寫）**、計畫檔路徑（有才給）、動過的檔案清單。
+審建議時多給第五樣：建議全文，加上它依據的事實來源路徑（紀錄檔、設定檔）——給來源，不給你的推論。
 **不轉述這輪經過**——轉述就把寫的人的假設帶過去了。結果回來：缺陷當場修，修完同樣再派一次，最多兩輪；
 第二輪仍有缺陷就停，列給使用者。使用者在新 session 打 `/cc-gate` 也算乾淨 context。
 
@@ -38,17 +40,23 @@ prompt 只給四樣：本檔路徑（先跑 `ls "${CLAUDE_PLUGIN_ROOT}/commands/
    - 只報會發生的：反例要是真實輸入觸發得了。
    - 在清單內挑最會靜默出錯的地方看：送出去的欄位名、留空的選填參數、新旗標有沒有真的改變行為、錯誤路徑回什麼。
 
+**建議分支**（對象是還沒動手的建議，沒有 diff 可看）：不抽完成條件，改成——
+把建議拆成逐條主張 → 每條對檔案或紀錄查證（附 `檔案:行號` 或指令輸出，數字自己重算）→
+逐條判「照做／換做法／不做」並附理由一句 → 另列建議漏掉、但同一目標下該做的事。
+
 ## 約束
 
 - **不改任何檔。** 想動手修就是搞錯角色：缺陷回報給派你的 session，由它修。
 - 只作用於當前 repo；動到兩個 repo 就各驗一次，沒驗的那個在結論明列。
 - 不確定標 `[需確認]`。缺陷與範圍外發現分開列，混在一起等於把缺陷埋了。
 - 跟 `/code-review` 的分界：那支找程式寫錯的地方；本支對的是「有沒有照要求做到」。
+- 跟 `/cc-root` 的分界：既有的計畫或規則檔走那支的審查；本 session 剛產出的改動或建議走本支。
 
 ## 回報
 
 第一行判定三選一：`gate: passes with nothing to fix`／`gate: <最嚴重那條缺陷一句>`／`gate: blocked on <什麼>`。
 接著：抽出的完成條件（逐條 ✔／✘＋證據）、缺陷（重現方式＋`檔案:行號`）、範圍外發現、哪些沒跑。
+建議分支的第一行改成 `gate: 建議成立`／`gate: <最該改的那一條一句>`，接著逐條主張（照做／換做法／不做＋證據）、漏掉的、沒查到的。
 
 一份合格回報長這樣（結構，不是內容）：
 
