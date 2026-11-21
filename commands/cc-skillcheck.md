@@ -3,7 +3,6 @@ description: 審一支 skill 專用（audit／review／審／分析某支 skill 
 argument-hint: "<skill 名稱或路徑，例：content-audit、anthropic-skills:skill-auditor、./skills/foo>"
 allowed-tools: Read, Glob, Grep, Bash(find:*), Bash(ls:*), Bash(grep:*)
 disallowed-tools: Write, Edit, NotebookEdit
-disable-model-invocation: true
 ---
 
 體檢 $ARGUMENTS 指定的**那一支** skill。沒給就回一句「要審哪支？給名稱或路徑」然後停，不自己挑、不整批掃。
