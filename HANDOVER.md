@@ -1,34 +1,34 @@
-基準：ed4256b @ 2026-11-06T23:09:54+0800
+基準：e4690f3 @ 2026-11-21
 
 # HANDOVER
 
 ## ① 狀態
 
-本輪做完：hook 精簡、`/cc-audit` 改名 `/cc-trim`、`cc-skillcheck` 去外部依賴，已合進 `main`。收輪 commit 未 push（見②）。
-未完成：`/cc-trim` 退格回報的一條 ritual 待使用者決定——`docs/decisions.md:14` 的括注與同檔〈hook 精簡（2026-11-06）〉節重講同一件事。
-下一輪從 `BACKLOG.md` #17 接。
+plugin 版本 0.7.13。11-06 後做完：plugin sync 逐層比對（#17，0.7.8）、guard-bash 三輪修補（0.7.7／0.7.9／0.7.10）、cc-gate 改成使用者說了才跑＋能審建議（0.7.11／0.7.12）、
+11-21 清 BACKLOG 10 條（文件對齊、安裝與檢查工具、審查類指令收尾，0.7.13）。
+未完成：`BACKLOG.md` 剩 #23、#30（都在 `guard-bash.mjs`，要使用者先定是否改用現成 shell parser，見 `docs/decisions.md` 11-11 guard-bash 條翻案條件）。
+0.7.13 改了 `tools/`，本機各層安裝要 `claude plugin update` 並重開 session，`PLUGIN_SYNC` 才會綠。
 
 ## ② 工作區
 
 - 分支：`main` 單線。查現況：`git status -sb`、`git log --oneline @{u}..HEAD`。
-- 本交接單寫入時：收輪的兩個 commit（歸檔與本檔）在本機，未 push。
-- 本機安裝：帳號層與專案層（本 repo、`meta-ads`）都是 0.7.1。查詢：`python3 -c 'import json,os;[print(e["scope"],e.get("projectPath",""),e["version"]) for e in json.load(open(os.path.expanduser("~/.claude/plugins/installed_plugins.json")))["plugins"]["cch-lite@cch-lite"]]'`
+- 是否已 push：[需確認]。
+- 本機安裝版本：[需確認]。查詢：`python3 -c 'import json,os;[print(e["scope"],e.get("projectPath",""),e["version"]) for e in json.load(open(os.path.expanduser("~/.claude/plugins/installed_plugins.json")))["plugins"]["cch-lite@cch-lite"]]'`
 
 ## ③ 下一輪 kickoff
 
-〔2026-11-11：下面這份 kickoff 指派的 BACKLOG #17 已做完（0.7.8），本節作廢，下一輪另寫。〕
+〔2026-11-21 重寫。上一份指派的 #17 已做完，舊 kickoff 已刪。〕
 
 ```
-【開工：修 BACKLOG #17——plugin sync 檢查要比對每一層安裝】一句話背景：cch-lite 是 Claude Code plugin（cc-* skill＋guard-bash hook）；上輪收在 0.7.1，hook 精簡、cc-trim 改名已上 main。
-開場先跑：git rev-parse --short HEAD / git log --oneline origin/HEAD -1 / git status --short
-  本 kickoff 產生於 ed4256b 之後；與實際不符以實際為準，並在回報點名差異。
+【開工：guard-bash #23／#30——先請使用者定「是否改用現成 shell parser」與「遠端 rm -rf 要不要放寬」】
+一句話背景：cch-lite 是 Claude Code plugin（cc-* skill＋guard-bash hook）；目前 0.7.13，BACKLOG 剩 2 條。
+開場先跑：git rev-parse --short HEAD / git log --oneline -5 / git status --short
+  本 kickoff 產生於 e4690f3；與實際不符以實際為準，並在回報點名差異。
 動程式碼的輪次：開工前先跑 sh test/run-all.sh 拿基線；紅了先停、不帶病開工。
-必讀：HANDOVER.md、BACKLOG.md、tools/check-plugin-sync.sh｜只做：BACKLOG #17
+必讀：HANDOVER.md、BACKLOG.md、`docs/decisions.md` guard-bash 各條｜只做：#23、#30
 完成定義：
-- tools/check-plugin-sync.sh 逐一比對 installed_plugins.json 裡 cch-lite@cch-lite 的每一筆安裝（帳號層＋各專案層），任一份與 repo 不一致就紅並印出哪一層、哪個專案路徑
-- 專案路徑已不存在的那筆安裝只印提示、不紅
-- 有一條測試證明「帳號層一致、某專案層舊版」會紅
-- sh test/run-all.sh ALL GREEN；改了 tools/ 照 README bump 版本
-- BACKLOG #17 移除（做完）
-不做：拿掉其他 repo 的 .claude/settings.json 專案層啟用（已否決：雲端 clone 靠它自動裝 plugin）｜約束：範圍外發現→BACKLOG.md 一行並當輪 commit
+- 指定條目修完並有對應測試；sh test/run-all.sh ALL GREEN
+- 改了 hooks/ 或 tools/ 照 README bump 版本
+- 做完的 BACKLOG 條目移除
+不做：guard-bash 以外的檔｜約束：範圍外發現→BACKLOG.md 一行並當輪 commit
 ```
