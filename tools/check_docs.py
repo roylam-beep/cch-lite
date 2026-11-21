@@ -32,6 +32,7 @@ import datetime
 import json
 import os
 import re
+import subprocess
 import sys
 
 # 字元上限。AGENTS.md 4,000 是常駐層重構後的值。**只降不升。**
@@ -204,6 +205,14 @@ def check_installed_hooks(root, fails):
             return 0
         base = m.group(1).strip()
         dst = os.path.join(base if os.path.isabs(base) else os.path.join(root, base), "hooks")
+    # 跟 install-hooks.sh 看同一個地方：設了 core.hooksPath 時 git 會改指那裡（實測 git 2.54）
+    try:
+        p = subprocess.run(["git", "-C", root, "rev-parse", "--git-path", "hooks"],
+                           capture_output=True, text=True, timeout=10).stdout.strip()
+        if p:
+            dst = p if os.path.isabs(p) else os.path.join(root, p)
+    except (OSError, subprocess.SubprocessError):
+        pass
     names = [n for n in sorted(os.listdir(src)) if not n.startswith(".")]
     for name in names:
         target = os.path.join(dst, name)

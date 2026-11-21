@@ -12,4 +12,3 @@
 |---|---|---|
 | 23 | `guard-bash.mjs`：`ssh 主機 '…'` 內文照本機規則判，遠端 `rm -rf` 一律問（清遠端快取也問）；要不要放寬待使用者定 | 2026-11-11 |
 | 30 | `guard-bash.mjs` 仍放行：旗標放變數（`F=-rf; rm $F x`）、`{a,/x}` 大括號、`ssh h <<EOF` 內文、`$SSH` 沒在同條指令設值 | 2026-11-11 |
-| 34 | check_docs 讀 `.git/hooks`、install-hooks 用 `--git-path hooks`；有 `core.hooksPath` 時可能不同[需確認] | 2026-11-21 |

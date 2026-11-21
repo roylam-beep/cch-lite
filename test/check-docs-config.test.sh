@@ -47,5 +47,8 @@ git -C "$TMP/r" init -q
 mkdir -p "$TMP/r/ops/hooks"; printf '#!/bin/sh\necho a\n' > "$TMP/r/ops/hooks/pre-commit"
 run | grep -q "git hook 0 支" && ok "沒設：不看 ops/hooks（原行為）" || bad "預設行為變了：$(run)"
 CHECK_DOCS_HOOK_DIRS="ops/hooks" run | grep -q "git hook pre-commit 未安裝" && ok "CHECK_DOCS_HOOK_DIRS=ops/hooks → 找到真身" || bad "HOOK_DIRS 沒生效：$(CHECK_DOCS_HOOK_DIRS=ops/hooks run)"
+git -C "$TMP/r" config core.hooksPath .husky; mkdir -p "$TMP/r/.husky"; cp "$TMP/r/ops/hooks/pre-commit" "$TMP/r/.husky/"
+OUT="$(CHECK_DOCS_HOOK_DIRS="ops/hooks" run)"; ! echo "$OUT" | grep -q "pre-commit 未安裝" && ! echo "$OUT" | grep -q "不一致" \
+  && ok "core.hooksPath=.husky → 去 .husky 找已裝的 hook" || bad "core.hooksPath 沒跟上：$OUT"
 
-[ "$FAIL" -eq 0 ] && echo "CHECK_DOCS_CONFIG OK（10 項全過）" || { echo "CHECK_DOCS_CONFIG FAIL"; exit 1; }
+[ "$FAIL" -eq 0 ] && echo "CHECK_DOCS_CONFIG OK（11 項全過）" || { echo "CHECK_DOCS_CONFIG FAIL"; exit 1; }
