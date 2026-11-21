@@ -80,6 +80,41 @@ sh "${CLAUDE_PLUGIN_ROOT}/tools/install-hooks.sh"        # git hook（非 git re
   exit 1 → 佔位不動，寫進 `BACKLOG.md` 一行「填 .claude/settings.json 的 plugin 來源 owner/repo（來源：/cch-lite:cc-setup 安裝）」。
   佔位留著不填，cloud session 一樣沒有 cc-* 指令。
 
+- **W4.7**：標準件要進版控（cloud session 只看得到 commit 過的檔），但目標 repo 的 `.gitignore` 可能排除了
+  `.claude/` 或其中某檔，複製後 `git status` 看不到。複製完逐一跑 `git check-ignore -v <路徑>`；
+  被 ignore 的就在 `.gitignore` 末尾補 `!` 例外，**不准用 `git add -f` 頂過去**（下次別人 clone 後改這些檔又看不到）。
+  gitignore 規則：父目錄被排除時，檔案的 `!` 無效，要先 `!<目錄>/`，再用 `<目錄>/*` 把不要的子路徑排回去。
+  下面這段照此寫，會印出新增的每一行；仍被 ignore 的（例如子目錄另有 `.gitignore`）列出來並以 exit 1 結束：
+
+  ```bash
+  # W4.7 標準件不准被 .gitignore 排除
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    add() { for l in "$@"; do printf '%s\n' "$l" >> .gitignore; echo "+ .gitignore: $l"; done; }
+    FILES="CLAUDE.md AGENTS.md BACKLOG.md handovers/README.md docs/archive/rounds.md docs/archive/ICEBERG.md .claude/rules/implementation.md .claude/settings.json scripts/check_docs.py .github/workflows/harness.yml"
+    for p in $FILES; do
+      [ -e "$p" ] && git check-ignore -q "$p" || continue
+      git check-ignore -v "$p"
+      [ -z "$(tail -c1 .gitignore 2>/dev/null)" ] || echo >> .gitignore
+      rest=$p acc=
+      while :; do
+        case $rest in
+          */*) acc="$acc${rest%%/*}/"; rest=${rest#*/}
+               if git check-ignore -q "${acc%/}"; then add "!/$acc" "/$acc*"; fi ;;
+          *) break ;;
+        esac
+      done
+      add "!/$p"
+    done
+    bad=0
+    for p in $FILES; do
+      [ -e "$p" ] && git check-ignore -q "$p" && { echo "仍被 ignore: $p"; git check-ignore -v "$p"; bad=1; }
+    done
+    [ "$bad" = 0 ]
+  fi
+  ```
+
+  收尾回報明列「.gitignore 新增：X」（沒改就寫「.gitignore 未動」）；exit 1 的檔列給使用者一個決定。
+
 `CLAUDE.md` 已存在但內容是規則本文而非指標時，列出差異給使用者一個決定，不自己改。
 
 ## 第二段：自檢
@@ -96,11 +131,12 @@ sh "${CLAUDE_PLUGIN_ROOT}/tools/install-hooks.sh"        # git hook（非 git re
    W4.5 那兩條 `gh api`：workflow 在預設分支上、ruleset 有 `required_status_checks`？
    缺＝紅，但只回報，**第二段不建 ruleset**（建要走 W4.5 的同意）；沒有 `gh`＝「無法驗」，不當綠。
 4. 歪的是規則本身（不是檔案漂移）→ 明說「這要改設計」，不硬修。
+5. 標準件沒被 `.gitignore` 排除（W4.7 那串 `git check-ignore -q`）？命中＝紅；`doctor` 只回報，不補 `!`。
 
 ## 收尾回報
 
 1. 一句：「建立 X／補 Y／略過 Z（原因）」
-2. 一行自檢結果，W4.1／W4.2／W4.3／W4.4／W4.5／W4.6 六種一律明列，不得吞掉。
+2. 一行自檢結果，W4.1／W4.2／W4.3／W4.4／W4.5／W4.6／W4.7 七種一律明列，不得吞掉。
 3. **寫入清單**：逐一列出本次寫入的路徑，末尾聲明「repo 外 0 個檔被寫入」，建了 ruleset 就另列一行。
    有一筆落在 repo 外＝bug，必須明講而不是隱藏。
 4. 一句下一步。

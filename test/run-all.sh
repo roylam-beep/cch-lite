@@ -24,6 +24,7 @@ sh test/test-skills-hash.test.sh
 echo "── install-hooks／cc-setup 指令 ──"
 sh test/install-hooks.test.sh
 sh test/cc-setup-cmd.test.sh
+sh test/cc-setup-gitignore.test.sh
 echo "── pre-commit ──"
 sh test/pre-commit.test.sh
 echo "── harness workflow ──"
