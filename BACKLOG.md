@@ -12,4 +12,4 @@
 |---|---|---|
 | 23 | `guard-bash.mjs`：`ssh 主機 '…'` 內文照本機規則判，遠端 `rm -rf` 一律問（清遠端快取也問）；要不要放寬待使用者定 | 2026-11-11 |
 | 30 | `guard-bash.mjs` 仍放行：旗標放變數（`F=-rf; rm $F x`）、`{a,/x}` 大括號、`ssh h <<EOF` 內文、`$SSH` 沒在同條指令設值 | 2026-11-11 |
-| 34 | 實測：帳號層從資料夾讀（重開或 /reload-plugins 生效），專案層走 GitHub 快取要 update；README 生效表、check-plugin-sync 照此重寫 | 2026-11-21 |
+| 34 | check-plugin-sync：帳號層 installPath 指快取、update 卻說讀資料夾；查清後改比對邏輯與 FIX 提示（README 已標[需確認]） | 2026-11-21 |

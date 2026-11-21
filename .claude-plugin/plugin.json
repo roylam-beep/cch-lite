@@ -1,6 +1,6 @@
 {
   "name": "cch-lite",
-  "version": "0.7.14",
+  "version": "0.7.15",
   "description": "Claude Code 輕量開發治理層：cc-* skill 家族、攔不可逆指令的 Bash hook、文件閘、骨架安裝器。開發／SEO／行銷 repo 通用。",
   "author": {
     "name": "roylam-beep"
